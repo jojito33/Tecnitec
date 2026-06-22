@@ -1,0 +1,93 @@
+{
+  "name": "tecnitec-core",
+  "version": "31.81.0",
+  "description": "Sistema de Gestión TECNITEC",
+  "author": "TECNITEC <tecnitec@example.com>",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --x64",
+    "build:dir": "electron-builder --win --x64 --dir",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "build:x86": "electron-rebuild -f -w better-sqlite3 --arch ia32 && electron-builder --win --ia32",
+    "build:both": "electron-builder --win",
+    "rebuild:x86": "electron-rebuild -f -w better-sqlite3 --arch ia32",
+    "prebuild": "electron-rebuild -f -w better-sqlite3"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.0.0",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "electron-updater": "^6.3.9",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "googleapis": "^171.4.0",
+    "jsonwebtoken": "^9.0.2",
+    "whatsapp-web.js": "^1.23.0",
+    "winston": "^3.11.0",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.2",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.tecnitec.core",
+    "productName": "TECNITEC CORE",
+    "copyright": "Copyright © 2025 TECNITEC",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "publish": {
+      "provider": "generic",
+      "url": "https://jojito33.github.io/tecnitec/updates/"
+    },
+    "files": [
+      "main.js",
+      "server.js",
+      "index.html",
+      "license.js",
+      "package.json",
+      "node_modules/**/*",
+      "!node_modules/puppeteer/.local-chromium/**/*",
+      "!node_modules/puppeteer/chromium/**/*",
+      "!node_modules/puppeteer/.local-browsers/**/*",
+      "!**/*.md",
+      "!**/*.map",
+      "!**/.git/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "TECNITEC-CORE-portable-${version}.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "TECNITEC CORE",
+      "deleteAppDataOnUninstall": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "runAfterFinish": true
+    }
+  }
+}

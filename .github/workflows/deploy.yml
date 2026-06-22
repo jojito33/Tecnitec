@@ -1,0 +1,43 @@
+name: Build & Deploy a GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Compilar app (genera instalador NSIS + latest.yml)
+        run: npm run build
+
+      - name: Preparar archivos para deploy
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path deploy\updates -Force
+          Copy-Item dist\latest.yml -Destination deploy\updates\
+          Get-ChildItem dist\*.exe | Copy-Item -Destination deploy\updates\
+          Get-ChildItem dist\*.blockmap | Copy-Item -Destination deploy\updates\
+          if (Test-Path dist\version.json) { Copy-Item dist\version.json -Destination deploy\updates\ }
+
+      - name: Desplegar a GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./deploy
+          keep_files: false
+          force_orphan: true
+          enable_jekyll: false
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
