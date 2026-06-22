@@ -1,5 +1,8 @@
 node_modules/
 dist/
+wa-session/
+logs/
+flutter_whatsapp_bot/
 *.db
 *.db-wal
 *.db-shm
