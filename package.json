@@ -43,7 +43,7 @@
     },
     "publish": {
       "provider": "generic",
-      "url": "https://jojito33.github.io/tecnitec/updates/"
+      "url": "https://jojito33.github.io/Tecnitec/updates/"
     },
     "files": [
       "main.js",
