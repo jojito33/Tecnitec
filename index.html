@@ -644,6 +644,7 @@
     </aside>
 
     <main class="view" id="content-area"></main>
+    <div id="chatbot-container" style="display:none; flex-grow:1; padding:16px 24px; overflow-y:auto; background:var(--view-bg); flex-direction:column;"></div>
     <div id="print-area"></div>
     <div id="datalists-live"></div>
 
@@ -2894,7 +2895,10 @@ ${(cfg.mensaje_bienvenida || '').replace(/{nombre}/g, 'Juan').replace(/{negocio}
             }).reverse(); 
             
             document.getElementById('taller-grid').innerHTML = filtered.map(o => {
-                const marca = o.marca || 'Sin marca';
+                const tipo = o.tipo_equipo || '';
+                const marca = o.marca || '';
+                const modelo = o.modelo || '';
+                const equipoLabel = [tipo, marca, modelo].filter(Boolean).join(' ') || 'Sin equipo';
                 const estado = o.estado || 'Pendiente';
                 const nombreCompleto = o.nombre_completo || 'Sin nombre';
                 const presupuesto = o.presupuesto || 0;
@@ -2904,14 +2908,14 @@ ${(cfg.mensaje_bienvenida || '').replace(/{nombre}/g, 'Juan').replace(/{negocio}
                 <div class="card" style="border-left:5px solid ${estado==='Listo'?'var(--success)':'var(--warning)'}">
                     <div style="display:flex; justify-content:space-between; align-items: center; margin-bottom: 10px;">
                         <div onclick="verOrden('${o.id}')" style="cursor:pointer; flex: 1;">
-                            <b>#${o.id} - ${marca}</b>
+                            <b>#${o.id}</b> ${equipoLabel}
                             <span class="status-badge st-${estado.toLowerCase()}" style="margin-left: 10px;">${estado}</span>
                         </div>
                         <div style="display: flex; gap: 5px;">
                             <button onclick="event.stopPropagation(); editarOrden(${o.id})" style="background: var(--info); border: none; padding: 5px 10px; border-radius: 5px; color: white; cursor: pointer; font-size: 0.8rem;" title="Editar">
                                 ✏️
                             </button>
-                            <button onclick="event.stopPropagation(); eliminarOrden(${o.id}, '${marca.replace(/'/g, "\\'")}')" style="background: var(--primary); border: none; padding: 5px 10px; border-radius: 5px; color: white; cursor: pointer; font-size: 0.8rem;" title="Eliminar">
+                            <button onclick="event.stopPropagation(); eliminarOrden(${o.id}, '${(o.marca || '').replace(/'/g, "\\'")}')" style="background: var(--primary); border: none; padding: 5px 10px; border-radius: 5px; color: white; cursor: pointer; font-size: 0.8rem;" title="Eliminar">
                                 🗑️
                             </button>
                         </div>
@@ -2942,7 +2946,11 @@ ${(cfg.mensaje_bienvenida || '').replace(/{nombre}/g, 'Juan').replace(/{negocio}
             const estado = o.estado || 'Pendiente';
             const notasTecnicas = o.notas_tecnicas || '';
             
-            document.getElementById('side-orden').innerHTML = `<div class="card"><h3>Orden #${o.id}</h3><p style="font-size:0.9rem"><b>Falla:</b> ${falla}<br><b>Clave:</b> ${clave}</p><div style="background:rgba(0,0,0,0.2); padding:10px; border-radius:10px; margin-bottom:15px; font-size:0.85rem"><div style="display:flex; justify-content:space-between"><span>Total:</span> <span>$${presupuesto}</span></div><div style="display:flex; justify-content:space-between; color:var(--warning)"><span>Seña:</span> <span>$${sena}</span></div><div style="display:flex; justify-content:space-between; color:var(--success); font-weight:bold; border-top:1px solid var(--accent); margin-top:5px; pt:5px"><span>Saldo:</span> <span>$${presupuesto - sena}</span></div></div><span class="info-label">Estado</span><select id="edit-estado">
+            const tipoEquipo = o.tipo_equipo || '';
+            const marcaEquipo = o.marca || '';
+            const modeloEquipo = o.modelo || '';
+            const equipoLabel = [tipoEquipo, marcaEquipo, modeloEquipo].filter(Boolean).join(' ') || '—';
+            document.getElementById('side-orden').innerHTML = `<div class="card"><h3>Orden #${o.id}</h3><p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:6px;"><b>Equipo:</b> ${equipoLabel}</p><p style="font-size:0.9rem"><b>Falla:</b> ${falla}<br><b>Clave:</b> ${clave}</p><div style="background:rgba(0,0,0,0.2); padding:10px; border-radius:10px; margin-bottom:15px; font-size:0.85rem"><div style="display:flex; justify-content:space-between"><span>Total:</span> <span>$${presupuesto}</span></div><div style="display:flex; justify-content:space-between; color:var(--warning)"><span>Seña:</span> <span>$${sena}</span></div><div style="display:flex; justify-content:space-between; color:var(--success); font-weight:bold; border-top:1px solid var(--accent); margin-top:5px; pt:5px"><span>Saldo:</span> <span>$${presupuesto - sena}</span></div></div><span class="info-label">Estado</span><select id="edit-estado">
 ${['Pendiente','En diagnóstico','Presupuesto enviado','Esperando aprobación','En reparación','Esperando repuestos','Listo','Entregado'].map(s=>`<option value="${s}" ${estado===s?'selected':''}>${s}</option>`).join('')}
 </select><span class="info-label">Notas Técnicas</span><textarea id="edit-notas">${notasTecnicas}</textarea><button onclick="guardarCambiosTaller(${o.id})" class="nav-btn active" style="text-align:center">GUARDAR</button><button onclick="imprimirTicketOrden(${o.id})" style="width:100%; margin-top:10px; background:var(--accent); border:none; padding:10px; border-radius:10px; color:white; cursor:pointer">🖨️ REIMPRIMIR</button>
 <button onclick="verHistorialOrden(${o.id})" style="width:100%; margin-top:6px; background:rgba(99,102,241,.15); border:1px solid #6366f1; padding:8px; border-radius:10px; color:#818cf8; cursor:pointer; font-size:.82rem;">📋 Ver historial de cambios</button>
@@ -6358,25 +6366,14 @@ async function abrirWAWebView(telefono, mensaje) {
     var url = 'https://web.whatsapp.com/send?phone=' + telefono.replace(/\D/g,'');
     if (mensaje) url += '&text=' + mensaje;
     try {
-        // Si ya estamos en chatbot, no re-renderizar (preserva sesión webview)
-        var wv = document.getElementById('wa-webview');
-        if (!wv || !document.getElementById('wa-panel')) {
-            await nav('chatbot');
-        } else {
-            // Solo actualizar active nav
-            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById('btn-chatbot').classList.add('active');
-        }
-        // Esperar a que el webview esté montado
-        if (!wv) {
-            wv = await new Promise(function(resolve) {
-                var interval = setInterval(function() {
-                    var el = document.getElementById('wa-webview');
-                    if (el) { clearInterval(interval); resolve(el); }
-                }, 200);
-                setTimeout(function() { clearInterval(interval); resolve(null); }, 8000);
-            });
-        }
+        await nav('chatbot');
+        var wv = await new Promise(function(resolve) {
+            var interval = setInterval(function() {
+                var el = document.getElementById('wa-webview');
+                if (el) { clearInterval(interval); resolve(el); }
+            }, 200);
+            setTimeout(function() { clearInterval(interval); resolve(null); }, 8000);
+        });
         if (wv && wv.loadURL) {
             wv.loadURL(url);
             showToast('📩 Abriendo chat...', 'info');
@@ -6389,7 +6386,7 @@ async function abrirWAWebView(telefono, mensaje) {
 }
 
 async function renderChatbotAdmin() {
-    const area = document.getElementById('content-area');
+    const area = document.getElementById('chatbot-container');
 
     // Cargar datos en paralelo
     let conversaciones = [], consultasPendientes = [], waStatus = {};
@@ -6529,8 +6526,7 @@ async function renderChatbotAdmin() {
     (function crearWebView() {
         const container = document.getElementById('wa-webview-container');
         if (!container) return;
-        let existing = document.getElementById('wa-webview');
-        if (existing) { existing.remove(); existing = null; }
+        if (document.getElementById('wa-webview')) return;
         const wv = document.createElement('webview');
         wv.id = 'wa-webview';
         wv.setAttribute('partition', 'persist:whatsapp');
@@ -6771,13 +6767,24 @@ function renderConsultasPendientes(c) { return ''; }
 function renderConversacionesRecientes(c) { return ''; }
 
 // Modificar la función nav para incluir chatbot
+// Preserva el webview entre navegaciones (no lo destruye al cambiar de pestaña)
 const originalNav = nav;
+let _chatbotRendered = false;
 nav = async function(v) {
+    const contentArea = document.getElementById('content-area');
+    const chatbotContainer = document.getElementById('chatbot-container');
     if (v === 'chatbot') {
-        await renderChatbotAdmin();
+        if (!_chatbotRendered) {
+            await renderChatbotAdmin();
+            _chatbotRendered = true;
+        }
+        contentArea.style.display = 'none';
+        chatbotContainer.style.display = 'flex';
         document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
         document.getElementById('btn-chatbot').classList.add('active');
     } else {
+        chatbotContainer.style.display = 'none';
+        contentArea.style.display = '';
         originalNav(v);
     }
 };
