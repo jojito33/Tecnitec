@@ -52,6 +52,7 @@
       "license.js",
       "backup.service.js",
       "package.json",
+      "tecnitec_v31.db",
       "node_modules/**/*",
       "!node_modules/puppeteer/.local-chromium/**/*",
       "!node_modules/puppeteer/chromium/**/*",
