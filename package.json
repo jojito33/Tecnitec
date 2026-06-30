@@ -1,6 +1,6 @@
 {
   "name": "tecnitec-core",
-  "version": "31.81.0",
+  "version": "31.81.1",
   "description": "Sistema de Gestión TECNITEC",
   "author": "TECNITEC <tecnitec@example.com>",
   "main": "main.js",
