@@ -825,7 +825,7 @@ app.whenReady().then(async function() {
 
     // ── Configurar autoUpdater (solo en modo empaquetado) ──
     if (app.isPackaged) {
-        autoUpdater.setFeedURL({ provider: 'generic', url: 'https://jojito33.github.io/tecnitec/updates/' });
+        autoUpdater.setFeedURL({ provider: 'generic', url: 'https://jojito33.github.io/Tecnitec/updates/' });
 
         autoUpdater.on('checking-for-update', function() {
             writeLog('[UPDATER] Verificando actualizaciones...');
