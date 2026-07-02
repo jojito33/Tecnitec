@@ -398,6 +398,7 @@
         .carrito-item .cantidad-controls { display: flex; gap: 8px; align-items: center; margin-top: 5px; }
         .carrito-item .cantidad-controls button { width: 30px; height: 30px; border-radius: 6px; border: none; background: var(--primary); color: white; cursor: pointer; font-size: 1.1rem; }
         .carrito-item .cantidad-controls span { min-width: 30px; text-align: center; color: var(--text); }
+        .carrito-item-img { width: 48px; height: 48px; border-radius: 8px; object-fit: cover; margin-right: 12px; background: #070a13; flex-shrink: 0; }
         .carrito-totales { border-top: 2px solid var(--accent); padding-top: 15px; margin-top: auto; }
         .carrito-totales .linea { display: flex; justify-content: space-between; padding: 8px 0; color: var(--text); }
         .carrito-totales .total { font-size: 1.5rem; font-weight: bold; color: var(--primary); }
@@ -832,16 +833,32 @@
             <span class="info-label">Stock Inicial</span>
             <input id="np-stock" type="number" min="0" placeholder="0">
             <span class="info-label">Categoría</span>
-            <input id="np-categoria" list="dl-categorias" placeholder="Ej: Periféricos">
-            <span class="info-label">URL de Imagen (Opcional)</span>
-            <input id="np-imagen" placeholder="https://ejemplo.com/imagen.jpg">
-            <datalist id="dl-categorias">
-                <option value="Periféricos">
-                <option value="Cables">
-                <option value="Componentes">
-                <option value="Accesorios">
-                <option value="Servicios">
-            </datalist>
+            <div style="display:flex;gap:8px;align-items:stretch;">
+                <div style="position:relative;flex:1;">
+                    <input id="np-categoria-input" placeholder="Buscar o seleccionar..." autocomplete="off"
+                        oninput="npFiltrarCat(this.value)"
+                        onfocus="npAbrirDropdown()"
+                        onblur="setTimeout(npCerrarDropdown, 200)"
+                        onkeydown="npKeyNav(event)"
+                        style="width:100%;padding:11px 14px;background:var(--input-bg);border:1px solid var(--accent);border-radius:10px;color:var(--text);font-size:.9rem;outline:none;">
+                    <div id="np-cat-dropdown" style="display:none;position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--panel);border:1px solid #3b82f6;border-radius:12px;z-index:9999;max-height:220px;overflow-y:auto;box-shadow:0 12px 32px rgba(0,0,0,.6);padding:4px 0;"></div>
+                </div>
+                <button onclick="npAgregarCategoria()" title="Agregar categoría"
+                    style="padding:0 14px;background:linear-gradient(135deg,#3b82f6,#6366f1);border:none;border-radius:10px;color:white;font-size:1.3rem;font-weight:700;cursor:pointer;flex-shrink:0;line-height:1;">+</button>
+            </div>
+            <input type="hidden" id="np-categoria">
+            <span class="info-label">Imagen (Opcional)</span>
+            <label for="np-producto-img-input" style="display:block;cursor:pointer;">
+                <div id="np-producto-img-preview" style="width:100%;height:130px;border-radius:12px;border:2px dashed var(--accent);display:flex;align-items:center;justify-content:center;background:var(--input-bg);overflow:hidden;">
+                    <div id="np-producto-img-ph" style="text-align:center;color:var(--text-muted);pointer-events:none;">
+                        <div style="font-size:1.8rem;margin-bottom:4px;">📷</div>
+                        <div style="font-size:.75rem;">Tocá para subir imagen</div>
+                    </div>
+                    <img id="np-producto-img" src="" style="display:none;width:100%;height:100%;object-fit:cover;" />
+                </div>
+            </label>
+            <input type="hidden" id="np-imagen">
+            <input type="file" id="np-producto-img-input" accept="image/*" style="display:none;" onchange="npPreviewProductoImg(this)">
             <div style="margin-top: 20px;">
                 <button onclick="guardarProducto()" class="nav-btn active" style="text-align:center; margin-bottom: 10px; width: 100%;">
                     GUARDAR PRODUCTO
@@ -4075,6 +4092,7 @@ ${['Pendiente','En diagnóstico','Presupuesto enviado','Esperando aprobación','
                     <h2 style="color: var(--primary); margin: 0;">💰 Punto de Venta</h2>
                     <div style="display: flex; gap: 10px;">
                         <button onclick="abrirScanner()" class="nav-btn active" style="margin: 0;">📷 Escanear</button>
+                        <button onclick="nuevoProductoDesdePOS()" class="nav-btn" style="margin: 0;">➕ Producto</button>
                         <button onclick="verInventario()" class="nav-btn" style="margin: 0;">📦 Inventario</button>
                         <button onclick="verHistorialVentas()" class="nav-btn" style="margin: 0;">📊 Historial</button>
                     </div>
@@ -4271,7 +4289,8 @@ ${['Pendiente','En diagnóstico','Presupuesto enviado','Esperando aprobación','
                     precio: producto.precio,
                     cantidad: 1,
                     subtotal: producto.precio,
-                    stock_disponible: producto.stock
+                    stock_disponible: producto.stock,
+                    imagen_url: producto.imagen_url || ''
                 });
             }
             
@@ -4292,8 +4311,11 @@ ${['Pendiente','En diagnóstico','Presupuesto enviado','Esperando aprobación','
                 return;
             }
             
-            const html = carritoCompra.map(item => `
+            const html = carritoCompra.map(item => {
+                const imgSrc = item.imagen_url || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="48" height="48"%3E%3Crect width="48" height="48" fill="%231e293b"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="Arial" font-size="8" fill="%2364748b"%3EN/A%3C/text%3E%3C/svg%3E';
+                return `
                 <div class="carrito-item">
+                    <img src="${imgSrc}" alt="${item.nombre}" class="carrito-item-img">
                     <div style="flex: 1;">
                         <div class="nombre">${item.nombre}</div>
                         <div style="color: #94a3b8; font-size: 0.8rem;">$${item.precio.toFixed(2)} c/u</div>
@@ -4309,8 +4331,8 @@ ${['Pendiente','En diagnóstico','Presupuesto enviado','Esperando aprobación','
                             $${item.subtotal.toFixed(2)}
                         </div>
                     </div>
-                </div>
-            `).join('');
+                </div>`;
+            }).join('');
             
             document.getElementById('carrito-items').innerHTML = html;
             
@@ -4675,6 +4697,7 @@ ${['Pendiente','En diagnóstico','Presupuesto enviado','Esperando aprobación','
                         <table>
                             <thead>
                                 <tr>
+                                    <th>Imagen</th>
                                     <th>Código</th>
                                     <th>Nombre</th>
                                     <th>Precio</th>
@@ -4688,8 +4711,10 @@ ${['Pendiente','En diagnóstico','Presupuesto enviado','Esperando aprobación','
                 
                 productos.forEach(p => {
                     const stockBadge = p.stock <= 0 ? 'sin-stock' : (p.stock <= 5 ? 'bajo' : 'ok');
+                    const imgSrc = p.imagen_url || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="40" height="40"%3E%3Crect width="40" height="40" fill="%231e293b"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="Arial" font-size="10" fill="%2364748b"%3EN/A%3C/text%3E%3C/svg%3E';
                     html += `
                         <tr>
+                            <td><img src="${imgSrc}" alt="${p.nombre}" style="width:40px;height:40px;border-radius:6px;object-fit:cover;background:#070a13;"></td>
                             <td><strong>${p.codigo}</strong></td>
                             <td>${p.nombre}</td>
                             <td style="color: var(--primary); font-weight: bold;">$${p.precio.toFixed(2)}</td>
@@ -4726,8 +4751,13 @@ ${['Pendiente','En diagnóstico','Presupuesto enviado','Esperando aprobación','
             document.getElementById('np-precio').value = '';
             document.getElementById('np-stock').value = '';
             document.getElementById('np-categoria').value = '';
-  document.getElementById('np-categoria-input').value = '';
-  npCerrarDropdown();
+            document.getElementById('np-categoria-input').value = '';
+            npCerrarDropdown();
+            _npProductoImgB64 = null;
+            const prev = document.getElementById('np-producto-img');
+            const ph = document.getElementById('np-producto-img-ph');
+            if (prev) { prev.style.display = 'none'; prev.src = ''; }
+            if (ph) ph.style.display = '';
             document.getElementById('modal-producto').style.display = 'flex';
         }
         
@@ -4800,6 +4830,7 @@ ${['Pendiente','En diagnóstico','Presupuesto enviado','Esperando aprobación','
         function cerrarModalProducto() {
             document.getElementById('modal-producto').style.display = 'none';
             document.getElementById('np-codigo').disabled = false;
+            _desdePOS = false;
         }
         
         function ajustarStock(id, nombre, stockActual) {
@@ -5523,7 +5554,7 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             const precio = parseFloat(document.getElementById('np-precio').value);
             const stock = parseInt(document.getElementById('np-stock').value);
             const categoria = document.getElementById('np-categoria').value.trim();
-            const imagen_url = document.getElementById('np-imagen').value.trim();
+            const imagen_url = _npProductoImgB64 || '';
             
             if (!codigo || !nombre || !precio || precio < 0 || !stock || stock < 0 || !categoria) {
                 showToast('❌ Completa todos los campos obligatorios', 'error');
@@ -5554,7 +5585,12 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                     showToast('✅ Producto creado', 'success');
                 }
                 cerrarModalProducto();
-                verInventario();
+                if (_desdePOS) {
+                    _desdePOS = false;
+                    renderVentas();
+                } else {
+                    verInventario();
+                }
             } catch (error) {
                 console.error('Error:', error);
                 showToast('❌ Error al guardar producto', 'error');
@@ -5576,8 +5612,20 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                 document.getElementById('np-precio').value = producto.precio;
                 document.getElementById('np-stock').value = producto.stock;
                 document.getElementById('np-categoria').value = producto.categoria;
-                document.getElementById('np-imagen').value = producto.imagen_url || '';
+                document.getElementById('np-categoria-input').value = producto.categoria;
                 document.getElementById('modal-producto').style.display = 'flex';
+                
+                _npProductoImgB64 = producto.imagen_url || null;
+                const prev = document.getElementById('np-producto-img');
+                const ph = document.getElementById('np-producto-img-ph');
+                if (_npProductoImgB64 && prev) {
+                    prev.src = _npProductoImgB64;
+                    prev.style.display = '';
+                    if (ph) ph.style.display = 'none';
+                } else {
+                    if (prev) { prev.style.display = 'none'; prev.src = ''; }
+                    if (ph) ph.style.display = '';
+                }
             } catch (error) {
                 console.error('Error:', error);
                 showToast('❌ Error al cargar producto', 'error');
@@ -6998,6 +7046,39 @@ nav = async function(v) {
             if (prev) { prev.src = _npFotoB64; prev.style.display = 'block'; }
           };
           reader.readAsDataURL(file);
+        }
+
+        // ── PRODUCTO: imagen (file → base64) ──────
+        let _npProductoImgB64 = null;
+
+        function npPreviewProductoImg(input) {
+          const file = input.files[0];
+          if (!file) return;
+          if (file.size > 3 * 1024 * 1024) { showToast('⚠️ Imagen máximo 3 MB', 'warning'); return; }
+          const reader = new FileReader();
+          reader.onload = e => {
+            _npProductoImgB64 = e.target.result;
+            const prev = document.getElementById('np-producto-img');
+            const ph = document.getElementById('np-producto-img-ph');
+            if (prev) { prev.src = _npProductoImgB64; prev.style.display = ''; }
+            if (ph) ph.style.display = 'none';
+          };
+          reader.readAsDataURL(file);
+        }
+
+        // ── Quick product add desde POS ────────────
+        let _desdePOS = false;
+
+        function nuevoProductoDesdePOS() {
+            _desdePOS = true;
+            const area = document.getElementById('content-area');
+            const posPanel = document.getElementById('pos-productos-panel');
+            if (posPanel) {
+                nuevoProducto();
+            } else {
+                renderVentas();
+                setTimeout(nuevoProducto, 100);
+            }
         }
 
         // ── COMBO INCREMENTAL DE CATEGORÍAS ── (sin cambios)
