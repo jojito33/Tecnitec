@@ -6440,13 +6440,13 @@ async function renderChatbotAdmin() {
     let conversaciones = [], consultasPendientes = [], waStatus = {};
     try {
         const [convRes, consRes, waRes] = await Promise.all([
-            apiFetch(`${API}/chatbot/conversaciones`).then(r => r.json()),
-            apiFetch(`${API}/chatbot/consultas/pendientes`).then(r => r.json()),
+            apiFetch(`${API}/chatbot/conversaciones`).then(r => r.json()).catch(() => []),
+            apiFetch(`${API}/chatbot/consultas/pendientes`).then(r => r.json()).catch(() => []),
             apiFetch(`${API}/whatsapp/status`).then(r => r.json()).catch(() => ({}))
         ]);
-        conversaciones       = convRes;
-        consultasPendientes  = consRes;
-        waStatus             = waRes;
+        conversaciones       = Array.isArray(convRes) ? convRes : [];
+        consultasPendientes  = Array.isArray(consRes) ? consRes : [];
+        waStatus             = (waRes && typeof waRes === 'object') ? waRes : {};
     } catch (error) {
         console.error('Error cargando datos chatbot:', error);
     }
@@ -6618,13 +6618,17 @@ async function renderChatbotAdmin() {
         }, 3000);
     }
     async function _procesarMensajes(wv, msgs) {
+        // Extraer teléfono real desde la URL del webview (?phone=XXX)
+        var currentUrl = wv ? wv.getURL() : '';
+        var phoneMatch = currentUrl.match(/[?&]phone=(\d+)/);
+        var currentPhone = phoneMatch ? phoneMatch[1] : '';
         for (var i = 0; i < msgs.length; i++) {
             var msg = msgs[i];
             try {
                 var r = await fetch(API + '/api/webview/incoming-message', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ mensaje: msg.text, nombre: msg.nombre, telefono: msg.nombre })
+                    body: JSON.stringify({ mensaje: msg.text, nombre: msg.nombre, telefono: currentPhone || msg.nombre })
                 });
                 var data = await r.json();
                 if (data.respuesta && data.ok) {
@@ -6822,9 +6826,16 @@ nav = async function(v) {
     const contentArea = document.getElementById('content-area');
     const chatbotContainer = document.getElementById('chatbot-container');
     if (v === 'chatbot') {
-        if (!_chatbotRendered) {
-            await renderChatbotAdmin();
-            _chatbotRendered = true;
+        try {
+            if (!_chatbotRendered) {
+                await renderChatbotAdmin();
+                _chatbotRendered = true;
+            }
+        } catch(e) {
+            console.error('Error renderizando chatbot:', e);
+            if (!chatbotContainer.innerHTML.trim()) {
+                chatbotContainer.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-muted);"><div style="font-size:2rem;margin-bottom:8px;">🤖</div><p style="color:var(--primary);font-size:.82rem;margin-bottom:4px;">Error al cargar</p><p style="color:#94a3b8;font-size:.72rem;font-family:monospace;word-break:break-all;">' + (e.message || e) + '</p><button onclick="location.reload()" style="margin-top:12px;padding:10px 20px;background:var(--primary);color:white;border:none;border-radius:8px;cursor:pointer;">Reintentar</button></div>';
+            }
         }
         contentArea.style.display = 'none';
         chatbotContainer.style.display = 'flex';
@@ -7964,26 +7975,27 @@ nav = async function(v) {
 
   window.verChatCliente = async function(telefono, nombre) {
     if (!telefono) { return showToast("El cliente no tiene un número de WhatsApp asignado.", "primary"); }
-    document.getElementById('chat-header-nombre').innerText = nombre || 'Cliente';
-    document.getElementById('chat-header-telefono').innerText = telefono;
-    document.getElementById('chat-header-icon').innerText = (nombre || 'C').charAt(0).toUpperCase();
-    const area = document.getElementById('chat-messages-scroll');
-    area.innerHTML = '<div class="chat-empty">Cargando historial...</div>';
-    document.getElementById('modal-chat').style.display = 'flex';
     try {
-      const res = await apiFetch(`${API}/whatsapp/chat/${telefono}`);
+      const res = await apiFetch(`${API}/whatsapp/chat/${telefono}?nombre=${encodeURIComponent(nombre || '')}`);
       const mensajes = await res.json();
-      if (mensajes.length === 0) {
-        area.innerHTML = '<div class="chat-empty"><div style="font-size:2rem; margin-bottom:10px;">📭</div><div>No hay mensajes registrados aún</div></div>';
+      if (mensajes && mensajes.length > 0) {
+        document.getElementById('chat-header-nombre').innerText = nombre || 'Cliente';
+        document.getElementById('chat-header-telefono').innerText = telefono;
+        document.getElementById('chat-header-icon').innerText = (nombre || 'C').charAt(0).toUpperCase();
+        const area = document.getElementById('chat-messages-scroll');
+        area.innerHTML = mensajes.map(function(m) {
+          var date = new Date(m.fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          var isAI = m.is_ai === 1;
+          return '<div class="chat-bubble ' + m.direccion + (isAI ? ' ai' : '') + '">' + m.mensaje + '<span class="time">' + date + '</span></div>';
+        }).join('');
+        setTimeout(function() { area.scrollTop = area.scrollHeight; }, 100);
+        document.getElementById('modal-chat').style.display = 'flex';
         return;
       }
-      area.innerHTML = mensajes.map(m => {
-        const date = new Date(m.fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const isAI = m.is_ai === 1;
-        return `<div class="chat-bubble ${m.direccion} ${isAI ? 'ai' : ''}">${m.mensaje}<span class="time">${date}</span></div>`;
-      }).join('');
-      setTimeout(() => { area.scrollTop = area.scrollHeight; }, 100);
-    } catch(e) { area.innerHTML = `<div class="chat-empty">❌ Error al cargar chat: ${e.message}</div>`; }
+      // DB vacío → redirigir al webview de WhatsApp con el chat abierto
+      showToast('📩 Abriendo chat de WhatsApp...', 'info');
+      abrirWAWebView(telefono);
+    } catch(e) { showToast('❌ Error: ' + e.message, 'error'); }
   };
   window.cerrarChatCliente = () => { document.getElementById('modal-chat').style.display = 'none'; };
 

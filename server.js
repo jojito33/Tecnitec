@@ -1212,6 +1212,69 @@ app.post('/api/whatsapp/enviar', ...adminOTecnico, async (req, res) => {
     res.json({ ok: true, msg: 'Usá WhatsApp Web abierto en la ventana de TECNITEC para enviar mensajes' });
 });
 
+app.get('/api/whatsapp/chat/:telefono', ...adminOTecnico, async (req, res) => {
+    try {
+        const tel = req.params.telefono.replace(/\D/g, '');
+        const nom = (req.query.nombre || '').trim().toLowerCase();
+        var debug = { tel, nom };
+        const all = [];
+        // 1. Buscar en mensajes_chatbot (whatsapp-web.js bot)
+        const conv = await dbGet("SELECT id FROM conversaciones_chatbot WHERE replace(telefono,'-','') LIKE ?", [`%${tel}%`]);
+        if (conv) {
+            const msgs = await dbAll("SELECT * FROM mensajes_chatbot WHERE conversacion_id = ? ORDER BY fecha ASC", [conv.id]);
+            all.push(...msgs);
+        }
+        // 2. Buscar en consultas_presupuesto (webview incoming messages)
+        //    Buscar por teléfono (numérico) o por nombre (substring case-insensitive)
+        const consultas = await dbAll("SELECT * FROM consultas_presupuesto WHERE replace(telefono_cliente,'-','') LIKE ? OR (nombre_cliente IS NOT NULL AND LOWER(nombre_cliente) LIKE ?) ORDER BY fecha ASC", [`%${tel}%`, `%${nom}%`]);
+        debug.consultasEncontradas = consultas.length;
+        debug.primerTelefono = consultas.length ? consultas[0].telefono_cliente : null;
+        debug.primerNombre = consultas.length ? consultas[0].nombre_cliente : null;
+        // 3. Si no se encontró nada, traer total de registros en la tabla
+        if (!consultas.length) {
+            const total = await dbGet("SELECT COUNT(*) as count FROM consultas_presupuesto");
+            debug.totalConsultasTabla = total ? total.count : 0;
+        }
+        for (const c of consultas) {
+            all.push({ direccion: 'recibido', mensaje: c.descripcion, fecha: c.fecha, is_ai: 0 });
+            if (c.respuesta_ia) {
+                all.push({ direccion: 'enviado', mensaje: c.respuesta_ia, fecha: c.fecha_respuesta || c.fecha, is_ai: c.respuesta_automatica || 0 });
+            }
+        }
+        all.sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+        res.json(all);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Guardar mensajes scrapeados del webview
+app.post('/api/whatsapp/chat/scrape-save', ...adminOTecnico, async (req, res) => {
+    try {
+        const { telefono, nombre, mensajes } = req.body;
+        if (!telefono || !mensajes || !Array.isArray(mensajes)) {
+            return res.status(400).json({ error: 'telefono y mensajes requeridos' });
+        }
+        var tel = telefono.replace(/\D/g,'');
+        var conv = await dbGet("SELECT id FROM conversaciones_chatbot WHERE replace(telefono,'-','') LIKE ?", [`%${tel}%`]);
+        if (!conv) {
+            var r = await dbRun("INSERT INTO conversaciones_chatbot (telefono, nombre, fecha_ultimo) VALUES (?, ?, datetime('now'))", [telefono, nombre || '']);
+            conv = { id: r.lastID };
+        }
+        var inserted = 0;
+        for (var i = 0; i < mensajes.length; i++) {
+            var m = mensajes[i];
+            if (!m.mensaje || !m.fecha) continue;
+            var existing = await dbGet("SELECT id FROM mensajes_chatbot WHERE conversacion_id = ? AND fecha = ? AND mensaje = ?", [conv.id, m.fecha, m.mensaje]);
+            if (existing) continue;
+            await dbRun("INSERT INTO mensajes_chatbot (conversacion_id, mensaje, direccion, fecha, is_ai, leido) VALUES (?, ?, ?, ?, ?, 1)", [conv.id, m.mensaje, m.direccion || 'recibido', m.fecha, m.is_ai || 0]);
+            inserted++;
+        }
+        if (inserted > 0) {
+            await dbRun("UPDATE conversaciones_chatbot SET fecha_ultimo = datetime('now') WHERE id = ?", [conv.id]);
+        }
+        res.json({ ok: true, inserted: inserted });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // Chatbot admin endpoints
 app.get('/api/chatbot/config', ...soloAdmin, async (req, res) => {
     try {
@@ -1252,8 +1315,8 @@ app.get('/api/chatbot/conversaciones', ...soloAdmin, async (req, res) => {
     catch(e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/chatbot/consultas/pendientes', ...soloAdmin, async (req, res) => {
-    try { res.json(await dbAll("SELECT * FROM consultas_presupuesto WHERE estado = 'pendiente' ORDER BY fecha")); }
-    catch(e) { res.status(500).json({ error: e.message }); }
+    try { const rows = await dbAll("SELECT * FROM consultas_presupuesto WHERE estado = 'pendiente' ORDER BY fecha"); res.json(rows || []); }
+    catch(e) { res.json([]); }
 });
 app.post('/api/chatbot/responder-consulta', ...adminOTecnico, async (req, res) => {
     const { consulta_id, tecnico, respuesta, presupuesto } = req.body;
