@@ -24,6 +24,8 @@
     "express-rate-limit": "^7.1.5",
     "googleapis": "^171.4.0",
     "jsonwebtoken": "^9.0.2",
+    "puppeteer-core": "^24.38.0",
+    "qrcode": "^1.5.4",
     "whatsapp-web.js": "^1.23.0",
     "winston": "^3.11.0",
     "ws": "^8.16.0"
