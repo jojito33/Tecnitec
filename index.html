@@ -7873,7 +7873,8 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             var lineas = [];
             lineas.push('🧾 *' + (store.ticket.local || 'TECNITEC') + ' - ORDEN #' + String(o.id).padStart(4, '0') + '*');
             lineas.push(sep);
-            lineas.push(padTo('📅 *Ingreso:*', W) + (o.fecha_hora || ''));
+            try { var d = new Date(o.fecha_hora); var f = ('0'+d.getDate()).slice(-2) + '-' + ('0'+(d.getMonth()+1)).slice(-2) + '-' + d.getFullYear() + ' ' + ('0'+d.getHours()).slice(-2) + ':' + ('0'+d.getMinutes()).slice(-2); } catch(e) { var f = o.fecha_hora || ''; }
+            lineas.push(padTo('📅 *Ingreso:*', W) + f);
             lineas.push(padTo('👤 *Cliente:*', W) + (cl.nombre_completo || o.nombre_completo || 'Cliente'));
             lineas.push(padTo('📞 *Celular:*', W) + (cl.celular || o.celular || '-'));
             lineas.push(' ');
@@ -7881,65 +7882,43 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             lineas.push(padTo('⚠️ *Falla:*', W) + (o.falla || '-'));
             lineas.push(padTo('📦 *Accesorios:*', W) + (o.accesorios || '-'));
             lineas.push(padTo('✅ *Enciende:*', W) + (o.enciende ? 'Sí' : 'No'));
-            lineas.push(padTo('📋 *Estado:*', W) + (o.estado || 'Pendiente'));
             lineas.push(' ');
             lineas.push(padTo('💰 *Presupuesto:*', W) + '$' + (o.presupuesto ? Number(o.presupuesto).toLocaleString('es-AR') : '0'));
             if (o.sena) lineas.push(padTo('💵 *Seña:*', W) + '$' + Number(o.sena).toLocaleString('es-AR'));
             if (o.presupuesto) lineas.push(padTo('🔴 *Saldo:*', W) + '$' + Number(o.presupuesto - o.sena).toLocaleString('es-AR'));
-            lineas.push(' ');
-            lineas.push(padTo('📱 *Consultas:*', W) + (store.ticket.telefono || ''));
             const ticketText = lineas.join('\n');
 
-            showToast('📩 Enviando ticket por WhatsApp...', 'info');
-            console.log('[WA Ticket] Iniciando envío para orden', ordenId, 'tel:', tel);
-
-            // ── Usar webview de WhatsApp Web ────────────────
-            var wv = document.getElementById('wa-webview');
-            if (!wv || !wv.src || !wv.executeJavaScript) {
-                if (typeof _chatbotRendered !== 'undefined' && !_chatbotRendered) {
-                    await renderChatbotAdmin();
-                    _chatbotRendered = true;
-                }
-                wv = document.getElementById('wa-webview');
-                if (!wv || !wv.src || !wv.executeJavaScript) {
-                    showToast('⚠️ Abrí WhatsApp Web desde el módulo Chatbot y enviá manualmente.', 'warning');
+            try {
+                const resp = await apiFetch(API + '/wa-bot/qr');
+                const status = await resp.json();
+                if (status.iniciando) {
+                    showToast('⏳ Conectando... esperá unos segundos', 'info');
                     return;
                 }
+                if (status.need_qr) {
+                    showToast('📱 Escaneá el QR en Ajustes → Chatbot', 'warning');
+                    return;
+                }
+                if (!status.conectado) {
+                    showToast('📱 Escaneá el QR en Ajustes → Chatbot', 'warning');
+                    return;
+                }
+                showToast('📩 Enviando ticket por WhatsApp...', 'info');
+                const resp2 = await apiFetch(API + '/wa-bot/send-message', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ telefono: tel, mensaje: ticketText })
+                });
+                const result = await resp2.json();
+                if (result.ok) {
+                    showToast('✅ Ticket enviado por WhatsApp', 'success');
+                } else {
+                    showToast('❌ ' + (result.error || 'Error al enviar') + (result.codigo ? ' (' + result.codigo + ')' : ''), 'error');
+                }
+            } catch (e) {
+                showToast('❌ Error de conexión', 'error');
+                console.error('[WA Ticket] Error:', e);
             }
-
-            wv.src = 'https://web.whatsapp.com/send?phone=' + tel;
-
-            var enviado = false;
-            var yaEscribio = false;
-            var jsText = JSON.stringify(ticketText);
-            for (var i = 0; i < 40; i++) {
-                await new Promise(function (r) { setTimeout(r, 1000); });
-                try {
-                    var r = await wv.executeJavaScript(
-                        'document.querySelector("footer [contenteditable]") ? "ready" : "wait"'
-                    );
-                    if (r === 'wait') { console.log('[WA Ticket] ' + i + ': wait'); continue; }
-                    console.log('[WA Ticket] ' + i + ': ready');
-
-                    if (!yaEscribio) {
-                        await wv.executeJavaScript(
-                            'var _i=document.querySelector("footer [contenteditable]");if(_i){_i.innerHTML=' + jsText + ';_i.dispatchEvent(new InputEvent("input",{bubbles:true,cancelable:true}));}'
-                        );
-                        yaEscribio = true;
-                        console.log('[WA Ticket] Texto escrito');
-                        continue;
-                    }
-
-                    var r3 = await wv.executeJavaScript(
-                        '(function(){var s=["button[aria-label=\\"Enviar\\"]","button[aria-label=\\"Send\\"]","button[data-testid=\\"compose-btn-send\\"]","[data-testid=\\"compose-btn-send\\"]","span[data-icon=\\"send\\"]","button span[data-icon=\\"send\\"]"];for(var i=0;i<s.length;i++){var e=document.querySelector(s[i]);if(e&&e.offsetParent!==null){e.click();return"sent";}}var fa=document.querySelectorAll("footer button,footer [role=\\"button\\"]");for(var i=0;i<fa.length;i++){var el=fa[i];if(!el.offsetParent)continue;var al=(el.getAttribute("aria-label")||"").toLowerCase();if(al.indexOf("enviar")>=0||al.indexOf("send")>=0){el.click();return"sent";}}return"nobtn";})()'
-                    );
-                    console.log('[WA Ticket] btn:', r3);
-                    if (r3 === 'sent') { enviado = true; break; }
-                } catch (e) { console.error('[WA Ticket] Error:', e.message || e); }
-            }
-
-            if (enviado) showToast('✅ Ticket enviado por WhatsApp', 'success');
-            else showToast('⚠️ No se pudo enviar. Abrí WhatsApp y enviá manualmente.', 'warning');
         }
 
         async function renderChatbotAdmin() {
@@ -8226,8 +8205,9 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                     apiFetch(`${API}/chatbot/config`).then(r => r.json()).catch(() => ({}))
                 ]);
                 _chatbotActivoCfg = cfgRes.chatbot_activo === '1';
+                console.log('[WA Bot QR] Estado - activo:' + _chatbotActivoCfg + ' qr:' + (qrRes.qr ? 'si' : 'no') + ' conectado:' + qrRes.conectado + ' need_qr:' + qrRes.need_qr);
                 _actualizarBotQRUI(qrRes);
-            } catch (e) { }
+            } catch (e) { console.warn('[WA Bot QR] Error inicial:', e); }
             if (_botQrInterval) clearInterval(_botQrInterval);
             _botQrInterval = setInterval(async () => {
                 try {
@@ -8236,31 +8216,43 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                         apiFetch(`${API}/chatbot/config`).then(r => r.json()).catch(() => ({}))
                     ]);
                     _chatbotActivoCfg = cfgRes.chatbot_activo === '1';
+                    console.log('[WA Bot QR] Poll - activo:' + _chatbotActivoCfg + ' qr:' + (qrRes.qr ? 'si' : 'no'));
                     _actualizarBotQRUI(qrRes);
                 } catch (e) { }
             }, 5000);
         }
 
         function _actualizarBotQRUI(data) {
-            const img = document.getElementById('bot-qr-img');
-            const area = document.getElementById('bot-qr-area');
-            const connectedMsg = document.getElementById('bot-connected-msg');
-            const badge = document.getElementById('cfg-bot-status');
+            var popup = document.getElementById('bot-qr-popup');
+            var badge = document.getElementById('cfg-bot-status');
             if (!_chatbotActivoCfg) {
-                if (area) area.style.display = 'none';
-                if (connectedMsg) connectedMsg.style.display = 'none';
+                if (popup) { popup.style.display = 'none'; popup.remove(); }
+                var cm = document.getElementById('bot-connected-msg');
+                if (cm) cm.style.display = 'none';
                 if (badge) { badge.style.color = ''; badge.style.background = ''; badge.className = 'cfg-status-indicator cfg-status-off'; badge.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block;"></span> CHATBOT INACTIVO'; }
-            } else if (data.qr) {
-                if (img) img.src = data.qr;
-                if (area) area.style.display = 'block';
-                if (connectedMsg) connectedMsg.style.display = 'none';
-                if (badge) { badge.className = 'cfg-status-indicator'; badge.style.color = '#eab308'; badge.style.background = 'rgba(234,179,8,0.15)'; badge.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:#eab308;display:inline-block;"></span> ESCANEAR QR'; }
-            } else if (data.conectado) {
-                if (area) area.style.display = 'none';
-                if (connectedMsg) connectedMsg.style.display = 'block';
+                return;
+            }
+            if (data.conectado) {
+                if (popup) { popup.style.display = 'none'; popup.remove(); }
+                var cm = document.getElementById('bot-connected-msg');
+                if (cm) cm.style.display = 'block';
                 if (badge) { badge.style.color = ''; badge.style.background = ''; badge.className = 'cfg-status-indicator cfg-status-on'; badge.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block;"></span> CHATBOT CONECTADO'; }
+                return;
+            }
+            if (data.qr) {
+                if (!popup) {
+                    popup = document.createElement('div');
+                    popup.id = 'bot-qr-popup';
+                    popup.style.cssText = 'position:fixed;top:10px;right:10px;z-index:99999;text-align:center;padding:20px;background:#1e293b;border:2px solid #334155;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.5);';
+                    popup.innerHTML = '<div style="font-size:0.85rem;color:#94a3b8;margin-bottom:12px;">📱 Escaneá este QR con WhatsApp para activar el chatbot:</div><div id="bot-qr-flotante" style="width:220px;height:220px;margin:0 auto;border-radius:8px;background:white;padding:4px;"></div><div style="margin-top:8px;"><button onclick="var e=document.getElementById(\'bot-qr-popup\');if(e){e.style.display=\'none\';e.remove();}" style="background:#ef4444;border:none;color:white;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:0.75rem;">✕ Cerrar</button></div>';
+                    document.body.appendChild(popup);
+                }
+                var cont = document.getElementById('bot-qr-flotante');
+                if (cont) cont.innerHTML = '<img src="' + data.qr + '" style="width:220px;height:220px;border-radius:8px;" />';
+                popup.style.display = 'block';
+                if (badge) { badge.className = 'cfg-status-indicator'; badge.style.color = '#eab308'; badge.style.background = 'rgba(234,179,8,0.15)'; badge.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:#eab308;display:inline-block;"></span> ESCANEAR QR'; }
             } else {
-                if (badge) { badge.className = 'cfg-status-indicator'; badge.style.color = '#3b82f6'; badge.style.background = 'rgba(59,130,246,0.15)'; badge.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:#3b82f6;display:inline-block;"></span> CONECTANDO...'; }
+                if (badge) { badge.className = 'cfg-status-indicator'; badge.style.color = '#3b82f6'; badge.style.background = 'rgba(63,131,246,0.15)'; badge.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:#3b82f6;display:inline-block;"></span> CONECTANDO...'; }
             }
         }
 

@@ -2114,6 +2114,7 @@ process.on('uncaughtException', (err) => {
 // ══════════════════════════════════════════════════════════════════════════════
 let waClient = null;
 let waQR = null;
+let waQRImage = null;
 let _waIniciando = false;
 
 async function _iniciarWABot() {
@@ -2139,11 +2140,20 @@ async function _iniciarWABot() {
         });
         waClient.on('qr', (qr) => {
             waQR = qr;
-            logger.info('[WA Bot] QR generado (escanear con WhatsApp)');
+            logger.info('[WA Bot] QR generado (escanear con WhatsApp) type=' + (typeof qr) + ' len=' + (typeof qr === 'string' ? qr.length : 0) + ' preview=' + (typeof qr === 'string' ? qr.substring(0, 80) : JSON.stringify(qr)));
+            // Generar imagen PNG del QR y guardar como data URL
+            try {
+                const QRCode = require('qrcode');
+                QRCode.toDataURL(qr, { width: 300, margin: 1 }, (err, url) => {
+                    if (!err) { waQRImage = url; logger.info('[WA Bot] QR imagen generada (' + url.length + ' chars)'); }
+                    else logger.warn('[WA Bot] Error generando imagen QR:', err.message);
+                });
+            } catch(e) { logger.warn('[WA Bot] Error en QRCode:', e.message); }
             broadcastWS('wa_qr', { qr });
         });
         waClient.on('ready', () => {
             waQR = null;
+            waQRImage = null;
             logger.info('[WA Bot] Conectado!');
             try { db.prepare(`UPDATE whatsapp_sesion SET estado='LISTO', conectado_en=datetime('now'), ultima_actividad=datetime('now') WHERE id=1`).run(); } catch(_) {}
             broadcastWS('wa_status', { estado: 'LISTO', conectado: true });
@@ -2202,12 +2212,13 @@ async function _iniciarWABot() {
 
 // Endpoints para el bot
 app.get('/api/wa-bot/qr', (req, res) => {
-    res.json({ qr: waQR, conectado: waClient ? true : false });
+    res.json({ qr: waQRImage || null, conectado: waQR === null && waClient !== null, need_qr: waQR !== null && waClient !== null, iniciando: waClient === null });
 });
 app.post('/api/wa-bot/disconnect', async (req, res) => {
     try {
         if (waClient) { await waClient.destroy(); waClient = null; }
         waQR = null;
+        waQRImage = null;
         try { db.prepare(`UPDATE whatsapp_sesion SET estado='DESCONECTADO' WHERE id=1`).run(); } catch(_) {}
         broadcastWS('wa_status', { estado: 'DESCONECTADO', conectado: false });
         res.json({ ok: true });
@@ -2217,6 +2228,37 @@ app.post('/api/wa-bot/connect', async (req, res) => {
     if (waClient) return res.json({ ok: true, conectado: true });
     _iniciarWABot();
     res.json({ ok: true });
+});
+app.post('/api/wa-bot/send-message', async (req, res) => {
+    try {
+        const { telefono, mensaje } = req.body || {};
+        if (!telefono || !mensaje) return res.json({ ok: false, error: 'Faltan datos' });
+        if (!waClient) return res.json({ ok: false, error: 'Bot no iniciado', codigo: 'no_bot' });
+        if (waQR) return res.json({ ok: false, error: 'Escaneá el QR primero', codigo: 'need_qr' });
+        let numero = String(telefono).replace(/\D/g, '');
+        logger.info('[WA Bot] send-message: telefono_recibido=' + telefono + ' numero_limpio=' + numero + ' waClient=' + (waClient ? 'si' : 'no'));
+        if (numero.startsWith('0')) numero = numero.substring(1);
+        if (!numero.startsWith('54')) numero = '54' + numero;
+        // Obtener el ID correcto del contacto (maneja LID de WhatsApp nuevo)
+        let chatId = numero + '@c.us';
+        try {
+            logger.info('[WA Bot] Obteniendo WID para ' + numero);
+            const wid = await waClient.getNumberId(numero);
+            if (wid && wid._serialized) {
+                chatId = wid._serialized;
+                logger.info('[WA Bot] WID obtenido: ' + chatId);
+            }
+        } catch(e) {
+            logger.warn('[WA Bot] Error obteniendo WID, usando @c.us: ' + e.message);
+        }
+        logger.info('[WA Bot] Enviando a ' + chatId);
+        await waClient.sendMessage(chatId, mensaje);
+        logger.info('[WA Bot] Mensaje enviado OK a ' + chatId);
+        res.json({ ok: true, metodo: 'bot' });
+    } catch(e) {
+        logger.warn('[WA Bot] Error al enviar: ' + e.message + ' stack=' + (e.stack || '').substring(0, 200));
+        res.json({ ok: false, error: e.message });
+    }
 });
 
 // Iniciar bot después de que el servidor esté arriba
