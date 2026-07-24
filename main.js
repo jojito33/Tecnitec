@@ -527,6 +527,7 @@ window.addEventListener('load',function(){
         show: false,
         backgroundColor: '#0b0f1a',
         title: 'TECNITEC CORE v31.81',
+        icon: path.join(__dirname, 'logo.png'),
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,

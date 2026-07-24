@@ -65,6 +65,7 @@
       "!**/.git/**/*"
     ],
     "win": {
+      "icon": "logo.png",
       "target": [
         {
           "target": "nsis",
