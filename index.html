@@ -1880,11 +1880,14 @@
                 <span class="info-label">Contraseña</span>
                 <input id="nu-password" type="password" placeholder="Mínimo 6 caracteres">
                 <span class="info-label">Rol</span>
-                <select id="nu-rol">
+                <select id="nu-rol" onchange="nuRolCambio()">
                     <option value="Administrador">Administrador</option>
                     <option value="Técnico">Técnico</option>
                     <option value="Vendedor">Vendedor</option>
                 </select>
+                <span class="info-label" style="display:block;margin-bottom:6px;">Módulos a los que puede acceder</span>
+                <div id="nu-modulos" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:4px;"></div>
+                <div style="color:#64748b;font-size:0.68rem;margin-bottom:14px;">⚙️ Ajustes solo está disponible para Administradores. Si no marcás ninguno, se usan los módulos por defecto del rol.</div>
                 <div style="margin-top: 20px;">
                     <button onclick="guardarUsuario()" class="nav-btn active"
                         style="text-align:center; margin-bottom: 10px; width: 100%; background: var(--primary); color: white; border: none; padding: 14px; border-radius: 12px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 20px rgba(239, 68, 68, 0.3);">GUARDAR
@@ -2029,19 +2032,24 @@
             <h3 id="producto-modal-title">Agregar Producto</h3>
             <input type="hidden" id="np-id">
             <span class="info-label">Código</span>
-            <input id="np-codigo" placeholder="Código único del producto"
+            <input id="np-codigo" placeholder="Código único del producto" autocomplete="off"
+                onkeydown="npEnterNext(event, 'np-nombre')"
                 style="width:100%;padding:11px 14px;background:var(--input-bg);border:1px solid var(--accent);border-radius:10px;color:var(--text);font-size:.9rem;outline:none;">
             <span class="info-label">Nombre</span>
-            <input id="np-nombre" placeholder="Nombre del producto"
+            <input id="np-nombre" placeholder="Nombre del producto" autocomplete="off"
+                onkeydown="npEnterNext(event, 'np-descripcion')"
                 style="width:100%;padding:11px 14px;background:var(--input-bg);border:1px solid var(--accent);border-radius:10px;color:var(--text);font-size:.9rem;outline:none;">
             <span class="info-label">Descripción</span>
-            <input id="np-descripcion" placeholder="Descripción breve"
+            <input id="np-descripcion" placeholder="Descripción breve" autocomplete="off"
+                onkeydown="npEnterNext(event, 'np-precio')"
                 style="width:100%;padding:11px 14px;background:var(--input-bg);border:1px solid var(--accent);border-radius:10px;color:var(--text);font-size:.9rem;outline:none;">
             <span class="info-label">Precio</span>
             <input id="np-precio" type="number" min="0" step="0.01" placeholder="0.00"
+                onkeydown="npEnterNext(event, 'np-stock')"
                 style="width:100%;padding:11px 14px;background:var(--input-bg);border:1px solid var(--accent);border-radius:10px;color:var(--text);font-size:.9rem;outline:none;">
             <span class="info-label">Stock Inicial</span>
             <input id="np-stock" type="number" min="0" placeholder="0"
+                onkeydown="npEnterNext(event, 'np-categoria-input')"
                 style="width:100%;padding:11px 14px;background:var(--input-bg);border:1px solid var(--accent);border-radius:10px;color:var(--text);font-size:.9rem;outline:none;">
             <span class="info-label">Categoría</span>
             <div style="display:flex;gap:8px;align-items:stretch;">
@@ -2056,6 +2064,8 @@
                 </div>
                 <button onclick="npAgregarCategoria()" title="Agregar categoría"
                     style="padding:0 14px;background:linear-gradient(135deg,#3b82f6,#6366f1);border:none;border-radius:10px;color:white;font-size:1.3rem;font-weight:700;cursor:pointer;flex-shrink:0;line-height:1;">+</button>
+                <button onclick="abrirGestionCategorias()" title="Gestionar categorías"
+                    style="padding:0 13px;background:var(--accent);border:1px solid var(--accent);border-radius:10px;color:var(--text);font-size:1.05rem;cursor:pointer;flex-shrink:0;line-height:1;">⚙️</button>
             </div>
             <input type="hidden" id="np-categoria">
             <span class="info-label">Imagen (Opcional)</span>
@@ -2082,6 +2092,24 @@
                     Cancelar
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- Modal Gestión de Categorías de Productos -->
+    <div id="modal-gestion-categorias" class="modal">
+        <div class="modal-content" style="max-width:520px;">
+            <h3 style="color: var(--primary); margin-bottom: 6px;">🏷️ Gestionar categorías</h3>
+            <div style="color:var(--text-muted);font-size:.78rem;margin-bottom:14px;">Agregá, renombrá o eliminá las categorías de productos.</div>
+            <div style="display:flex;gap:8px;margin-bottom:14px;">
+                <input id="gc-nuevo" placeholder="Nombre de la categoría..." autocomplete="off"
+                    onkeydown="if(event.key==='Enter'){guardarCategoriaModal();}"
+                    style="flex:1;padding:11px 14px;background:var(--input-bg);border:1px solid var(--accent);border-radius:10px;color:var(--text);font-size:.9rem;outline:none;">
+                <button onclick="guardarCategoriaModal()"
+                    style="padding:0 18px;background:linear-gradient(135deg,#3b82f6,#6366f1);border:none;border-radius:10px;color:white;font-weight:700;cursor:pointer;flex-shrink:0;">+</button>
+            </div>
+            <div id="gc-lista" style="max-height:320px;overflow-y:auto;margin-bottom:16px;"></div>
+            <button onclick="cerrarGestionCategorias()"
+                style="width:100%;background:var(--accent);border:none;border-radius:12px;color:#f1f5f9;padding:13px;cursor:pointer;font-weight:bold;">Cerrar</button>
         </div>
     </div>
 
@@ -2325,6 +2353,30 @@
         // ==========================================
         // SISTEMA DE AUTENTICACIÓN — GESTIÓN DE JWT
         // ==========================================
+
+        // ── Módulos de la app (control por usuario) ──
+        const _MODULOS_APP = [
+            { id: 'recepcion', nombre: 'Recepción',    icono: '📦' },
+            { id: 'taller',    nombre: 'Taller',       icono: '🛠️' },
+            { id: 'partes',    nombre: 'Partes',       icono: '🔩' },
+            { id: 'ventas',    nombre: 'Ventas',       icono: '💰' },
+            { id: 'clientes',  nombre: 'Clientes',     icono: '👥' },
+            { id: 'reportes',  nombre: 'Estadísticas', icono: '📊' },
+            { id: 'ajustes',   nombre: 'Ajustes',      icono: '⚙️' },
+            { id: 'chatbot',   nombre: 'Chatbot',      icono: '🤖' }
+        ];
+        const _MODULOS_POR_ROL = {
+            'Administrador': _MODULOS_APP.map(m => m.id),
+            'Técnico':       ['recepcion', 'taller', 'partes', 'clientes'],
+            'Vendedor':      ['ventas', 'clientes']
+        };
+        // Módulos efectivos del usuario actual (['*'] = todos). Se setea al iniciar sesión.
+        let _misModulos = [];
+        function _esAdminGlobal() { return _misModulos.includes('*'); }
+        function _puedeAccederModulo(id) {
+            return _misModulos.includes('*') || _misModulos.includes(id);
+        }
+        function _modulosPorRol(rol) { return (_MODULOS_POR_ROL[rol] || []).slice(); }
 
         // Token JWT en memoria (no en localStorage por seguridad)
         let _authToken = null;
@@ -3209,14 +3261,15 @@
 
         async function sync() {
             const [cl, cat, ord, prods] = await Promise.all([
-                apiFetch(`${API}/clientes`).then(r => r.json()),
-                apiFetch(`${API}/catalogo`).then(r => r.json()),
-                apiFetch(`${API}/ordenes`).then(r => r.json()),
+                apiFetch(`${API}/clientes`).then(r => r.json()).catch(() => []),
+                apiFetch(`${API}/catalogo`).then(r => r.json()).catch(() => []),
+                apiFetch(`${API}/ordenes`).then(r => r.json()).catch(() => []),
                 apiFetch(`${API}/productos`).then(r => r.json()).catch(() => [])
             ]);
-            store.clientes = cl;
-            store.catalogo = cat;
-            store.productos = prods;
+            store.clientes = Array.isArray(cl) ? cl : [];
+            store.catalogo = Array.isArray(cat) ? cat : [];
+            store.productos = Array.isArray(prods) ? prods : [];
+            apiFetch(`${API}/productos/categorias`).then(r => r.json()).then(rows => { _npServerCats = (rows || []).map(x => x.nombre); }).catch(() => {});
 
             // Merge órdenes: conservar las locales que el servidor aún no conoce
             const idsServidor = new Set(ord.map(o => String(o.id)));
@@ -3237,6 +3290,11 @@
             // Limpiar tmp que ya están en el servidor
             const _tmpRestantes = localesNuevas.filter(o => String(o.id).startsWith('tmp_'));
             try { localStorage.setItem('tc_ordenes_tmp', JSON.stringify(_tmpRestantes)); } catch (e) { }
+
+            // Reconciliar órdenes locales (tmp_) con el servidor
+            if (_serverOnline && _tmpRestantes.length > 0) {
+                _reconciliarTmpOrdenes(_tmpRestantes.slice());
+            }
 
             const config = cat.find(x => x.categoria === 'ticket_config');
             if (config) store.ticket = JSON.parse(config.valor);
@@ -4207,10 +4265,10 @@ ${(cfg.mensaje_bienvenida || '').replace(/{nombre}/g, 'Juan').replace(/{negocio}
                             <span class="status-badge st-${estado.toLowerCase()}" style="margin-left: 10px;">${estado}</span>
                         </div>
                         <div style="display: flex; gap: 5px;">
-                            <button onclick="event.stopPropagation(); editarOrden(${o.id})" style="background: var(--info); border: none; padding: 5px 10px; border-radius: 5px; color: white; cursor: pointer; font-size: 0.8rem;" title="Editar">
+                            <button onclick="event.stopPropagation(); editarOrden('${o.id}')" style="background: var(--info); border: none; padding: 5px 10px; border-radius: 5px; color: white; cursor: pointer; font-size: 0.8rem;" title="Editar">
                                 ✏️
                             </button>
-                            <button onclick="event.stopPropagation(); eliminarOrden(${o.id}, '${(o.marca || '').replace(/'/g, "\\'")}')" style="background: var(--primary); border: none; padding: 5px 10px; border-radius: 5px; color: white; cursor: pointer; font-size: 0.8rem;" title="Eliminar">
+                            <button onclick="event.stopPropagation(); eliminarOrden('${o.id}', '${(o.marca || '').replace(/'/g, "\\'")}')" style="background: var(--primary); border: none; padding: 5px 10px; border-radius: 5px; color: white; cursor: pointer; font-size: 0.8rem;" title="Eliminar">
                                 🗑️
                             </button>
                         </div>
@@ -4333,8 +4391,8 @@ ${(cfg.mensaje_bienvenida || '').replace(/{nombre}/g, 'Juan').replace(/{negocio}
             const equipoLabel = [tipoEquipo, marcaEquipo, modeloEquipo].filter(Boolean).join(' ') || '—';
             document.getElementById('side-orden').innerHTML = `<div class="card"><h3>Orden #${o.id}</h3><p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:6px;"><b>Equipo:</b> ${equipoLabel}</p><p style="font-size:0.9rem"><b>Falla:</b> ${falla}<br><b>Clave:</b> ${clave}</p><div style="background:rgba(0,0,0,0.2); padding:10px; border-radius:10px; margin-bottom:15px; font-size:0.85rem"><div style="display:flex; justify-content:space-between"><span>Total:</span> <span>$${presupuesto}</span></div><div style="display:flex; justify-content:space-between; color:var(--warning)"><span>Seña:</span> <span>$${sena}</span></div><div style="display:flex; justify-content:space-between; color:var(--success); font-weight:bold; border-top:1px solid var(--accent); margin-top:5px; pt:5px"><span>Saldo:</span> <span>$${presupuesto - sena}</span></div></div><span class="info-label">Estado</span><select id="edit-estado">
 ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación', 'En reparación', 'Esperando repuestos', 'Listo', 'Entregado'].map(s => `<option value="${s}" ${estado === s ? 'selected' : ''}>${s}</option>`).join('')}
-</select><span class="info-label">Notas Técnicas</span><textarea id="edit-notas">${notasTecnicas}</textarea><button onclick="guardarCambiosTaller(${o.id})" class="nav-btn active" style="text-align:center">GUARDAR</button><button onclick="imprimirTicketOrden(${o.id})" style="width:100%; margin-top:10px; background:var(--accent); border:none; padding:10px; border-radius:10px; color:white; cursor:pointer">🖨️ REIMPRIMIR</button>
-<button onclick="verHistorialOrden(${o.id})" style="width:100%; margin-top:6px; background:rgba(99,102,241,.15); border:1px solid #6366f1; padding:8px; border-radius:10px; color:#818cf8; cursor:pointer; font-size:.82rem;">📋 Ver historial de cambios</button>
+</select><span class="info-label">Notas Técnicas</span><textarea id="edit-notas">${notasTecnicas}</textarea><button onclick="guardarCambiosTaller('${o.id}')" class="nav-btn active" style="text-align:center">GUARDAR</button><button onclick="imprimirTicketOrden('${o.id}')" style="width:100%; margin-top:10px; background:var(--accent); border:none; padding:10px; border-radius:10px; color:white; cursor:pointer">🖨️ REIMPRIMIR</button>
+<button onclick="verHistorialOrden('${o.id}')" style="width:100%; margin-top:6px; background:rgba(99,102,241,.15); border:1px solid #6366f1; padding:8px; border-radius:10px; color:#818cf8; cursor:pointer; font-size:.82rem;">📋 Ver historial de cambios</button>
 <div id="historial-orden-${o.id}" style="display:none;margin-top:10px;"></div>
 </div>`;
         }
@@ -4342,6 +4400,22 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
         async function guardarCambiosTaller(id) {
             const est = document.getElementById('edit-estado').value;
             const notas = document.getElementById('edit-notas').value;
+
+            // Orden local (sin conexión): actualizar solo en este equipo
+            if (String(id).startsWith('tmp_')) {
+                const oTmp = store.ordenes.find(x => String(x.id) === String(id));
+                if (oTmp) {
+                    oTmp.estado = est;
+                    oTmp.notas_tecnicas = notas;
+                    _persistirTmpOrdenes();
+                }
+                showToast("Orden actualizada", "info");
+                await sync();
+                _recargarTaller();
+                if (est === 'Listo') await _notificarListo(id);
+                return;
+            }
+
             await apiFetch(`${API}/ordenes/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -4351,15 +4425,19 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
             await sync();
             _recargarTaller();
             if (est === 'Listo') {
-                const o = store.ordenes.find(x => String(x.id) === String(id));
-                if (!o) return;
-                const saldo = o.presupuesto - o.sena;
-                const msg = `Hola ${o.nombre_completo.split(' ')[0]}! Te avisamos de ${store.ticket.local} que tu ${o.marca} ${o.modelo} ya está LISTO para retirar. Saldo pendiente: $${saldo}. Te esperamos!`;
-                // Esperar a que termine de renderizar taller antes de navegar a chatbot
-                setTimeout(function () {
-                    abrirWAWebView(o.celular.replace(/\D/g, ''), encodeURIComponent(msg));
-                }, 200);
+                await _notificarListo(id);
             }
+        }
+
+        async function _notificarListo(id) {
+            const o = store.ordenes.find(x => String(x.id) === String(id));
+            if (!o) return;
+            const saldo = o.presupuesto - o.sena;
+            const msg = `Hola ${o.nombre_completo.split(' ')[0]}! Te avisamos de ${store.ticket.local} que tu ${o.marca} ${o.modelo} ya está LISTO para retirar. Saldo pendiente: $${saldo}. Te esperamos!`;
+            // Esperar a que termine de renderizar taller antes de navegar a chatbot
+            setTimeout(function () {
+                abrirWAWebView(o.celular.replace(/\D/g, ''), encodeURIComponent(msg));
+            }, 200);
         }
 
         async function verHistorialOrden(id) {
@@ -4367,6 +4445,11 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
             if (!div) return;
             if (div.style.display !== 'none') { div.style.display = 'none'; return; }
             div.style.display = 'block';
+            // Orden local: no tiene historial en el servidor
+            if (String(id).startsWith('tmp_')) {
+                div.innerHTML = '<div style="color:var(--text-muted);font-size:.78rem;padding:8px 0;text-align:center;">La orden local no tiene historial (aún no está en el servidor)</div>';
+                return;
+            }
             div.innerHTML = '<div style="color:var(--text-muted);font-size:.78rem;padding:8px 0;">Cargando...</div>';
             try {
                 const r = await apiFetch(`${API}/ordenes/${id}/historial`);
@@ -4421,7 +4504,7 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
 
             setField('edit-orden-id', o.id);
             setField('edit-cliente', o.nombre_completo);
-            setField('edit-fecha', o.fecha_hora.replace(' ', 'T'));
+            setField('edit-fecha', (o.fecha_hora || '').replace(' ', 'T'));
             setField('edit-tipo', o.tipo_equipo);
             setField('edit-marca', o.marca);
             setField('edit-modelo', o.modelo);
@@ -4471,6 +4554,17 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
                 clave: document.getElementById('edit-clave').value || null
             };
 
+            // Orden local (sin conexión): actualizar solo en este equipo
+            if (String(id).startsWith('tmp_')) {
+                Object.assign(ordenOriginal, ordenActualizada);
+                _persistirTmpOrdenes();
+                showToast('✅ Orden actualizada correctamente', 'success');
+                cerrarModalEditarOrden();
+                await sync();
+                _recargarTaller();
+                return;
+            }
+
             try {
                 const response = await apiFetch(`${API}/ordenes/${id}`, {
                     method: 'PUT',
@@ -4497,6 +4591,19 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
                 return;
             }
 
+            // Orden local (creada sin conexión): solo existe en este equipo
+            if (String(id).startsWith('tmp_')) {
+                store.ordenes = store.ordenes.filter(o => String(o.id) !== String(id));
+                _persistirTmpOrdenes();
+                showToast('✅ Orden eliminada correctamente', 'success');
+                _recargarTaller();
+                const sideOrden = document.getElementById('side-orden');
+                if (sideOrden && sideOrden.innerHTML.includes(`#${id}`)) {
+                    sideOrden.innerHTML = '<div class="card"><p style="text-align:center; color:#94a3b8;">Selecciona una orden para ver detalles</p></div>';
+                }
+                return;
+            }
+
             try {
                 const response = await apiFetch(`${API}/ordenes/${id}`, {
                     method: 'DELETE'
@@ -4517,6 +4624,57 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
             } catch (error) {
                 console.error('Error:', error);
                 showToast('❌ Error de conexión', 'error');
+            }
+        }
+
+        // ── Órdenes locales (tmp_) ──────────────────────────────────────────────
+        function _persistirTmpOrdenes() {
+            try {
+                localStorage.setItem('tc_ordenes_tmp', JSON.stringify(
+                    store.ordenes.filter(x => String(x.id).startsWith('tmp_'))
+                ));
+            } catch (e) { }
+        }
+
+        function _adoptarOrdenReal(tmpId, realId) {
+            store.ordenes = store.ordenes.map(o => String(o.id) === String(tmpId) ? { ...o, id: realId } : o);
+            _persistirTmpOrdenes();
+            if (document.getElementById('taller-grid') || document.getElementById('taller-kanban')) _recargarTaller();
+        }
+
+        // Intenta subir al servidor las órdenes locales que quedaron pendientes
+        async function _reconciliarTmpOrdenes(tmps) {
+            const CAMPOS_TMP = ['cliente_id', 'fecha_hora', 'tipo_equipo', 'marca', 'modelo',
+                'falla', 'clave', 'enciende', 'presupuesto', 'sena', 'estado_estetico',
+                'accesorios', 'estado', 'notas_tecnicas'];
+            for (const t of tmps) {
+                try {
+                    const r = await apiFetch(`${API}/ordenes`);
+                    const todas = Array.isArray(r) ? r : await r.json();
+                    const lista = Array.isArray(todas) ? todas : (todas.data || []);
+                    const dup = lista.find(x =>
+                        String(x.cliente_id) === String(t.cliente_id) &&
+                        String(x.fecha_hora || '') === String(t.fecha_hora || '') &&
+                        String(x.marca || '') === String(t.marca || '')
+                    );
+                    if (dup) {
+                        // Ya existe en el servidor → adoptar su id real
+                        _adoptarOrdenReal(t.id, dup.id);
+                    } else {
+                        const oServidor = {};
+                        CAMPOS_TMP.forEach(k => { if (t[k] !== undefined) oServidor[k] = t[k]; });
+                        const r2 = await apiFetch(`${API}/ordenes`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(oServidor)
+                        });
+                        const res = await r2.json().catch(() => ({}));
+                        const nuevoId = res.id || res.orden_id || res.insertId || res._id;
+                        if (nuevoId) _adoptarOrdenReal(t.id, nuevoId);
+                    }
+                } catch (e) {
+                    console.error('[reconciliar tmp]', e.message);
+                }
             }
         }
 
@@ -4601,11 +4759,7 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
             if (!yaEsta) store.ordenes.push({ ...o });
 
             // Persistir en localStorage para sobrevivir reinicios
-            try {
-                localStorage.setItem('tc_ordenes_tmp', JSON.stringify(
-                    store.ordenes.filter(x => String(x.id).startsWith('tmp_'))
-                ));
-            } catch (e) { }
+            _persistirTmpOrdenes();
 
             showToast("✅ Orden creada exitosamente", "success");
             imprimirTicketOrden(o.id);
@@ -6115,6 +6269,7 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
             document.getElementById('producto-modal-title').innerText = 'Agregar Producto';
             document.getElementById('np-id').value = '';
             document.getElementById('np-codigo').value = '';
+            document.getElementById('np-codigo').disabled = false;
             document.getElementById('np-nombre').value = '';
             document.getElementById('np-descripcion').value = '';
             document.getElementById('np-precio').value = '';
@@ -6128,6 +6283,8 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
             if (prev) { prev.style.display = 'none'; prev.src = ''; }
             if (ph) ph.style.display = '';
             document.getElementById('modal-producto').style.display = 'flex';
+            const npPrimerCampo = document.getElementById('np-codigo');
+            if (npPrimerCampo) setTimeout(function() { npPrimerCampo.focus(); }, 50);
         }
 
         async function editarProducto(id) {
@@ -6144,7 +6301,10 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
                 document.getElementById('np-precio').value = producto.precio;
                 document.getElementById('np-stock').value = producto.stock;
                 document.getElementById('np-categoria').value = producto.categoria;
+                document.getElementById('np-categoria-input').value = producto.categoria || '';
                 document.getElementById('modal-producto').style.display = 'flex';
+                const npCampoEdicion = document.getElementById('np-nombre');
+                if (npCampoEdicion) setTimeout(function() { npCampoEdicion.focus(); }, 50);
             } catch (error) {
                 console.error('Error:', error);
                 showToast('❌ Error al cargar producto', 'error');
@@ -7065,14 +7225,74 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
         // ==========================================
         // GESTIÓN DE USUARIOS
         // ==========================================
+        function _badgeModulos(modulos) {
+            if (Array.isArray(modulos) && modulos[0] === '*') return '<span style="color:#10b981;font-size:0.72rem;font-weight:bold;">✓ Todos</span>';
+            const lista = Array.isArray(modulos) ? modulos : [];
+            if (lista.length === 0) return '<span style="color:#64748b;font-size:0.72rem;">—</span>';
+            return lista.map(id => {
+                const m = _MODULOS_APP.find(x => x.id === id);
+                return m ? `<span title="${m.nombre}" style="background:var(--accent);border:1px solid #334155;border-radius:6px;padding:2px 6px;margin:1px 2px;font-size:0.7rem;">${m.icono}</span>` : '';
+            }).join('');
+        }
+
+        function _renderModulosSelector(sel) {
+            const cont = document.getElementById('nu-modulos');
+            if (!cont) return;
+            const rol = document.getElementById('nu-rol').value;
+            const rolAdmin = rol === 'Administrador';
+            const selSet = new Set(sel || []);
+            cont.innerHTML = _MODULOS_APP.map(m => {
+                const esAdminOnly = m.id === 'ajustes';
+                const disabled = rolAdmin || (esAdminOnly && !rolAdmin);
+                const checked = rolAdmin || selSet.has(m.id);
+                const style = [
+                    'display:flex', 'align-items:center', 'gap:8px', 'padding:9px 10px',
+                    'border-radius:8px', 'cursor:' + (disabled ? 'not-allowed' : 'pointer'),
+                    'background:' + (checked ? 'rgba(59,130,246,0.18)' : 'var(--accent)'),
+                    'border:1px solid ' + (checked ? 'var(--primary)' : 'var(--accent)'),
+                    'opacity:' + (disabled ? '0.55' : '1'), 'font-size:0.8rem', 'user-select:none'
+                ].join(';');
+                return `<label data-mod="${m.id}" style="${style}" onclick="nuToggleModulo('${m.id}', this)">
+                    <input type="checkbox" data-mod="${m.id}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} style="pointer-events:none;accent-color:#3b82f6;">
+                    <span>${m.icono} ${m.nombre}</span>
+                    ${esAdminOnly && !rolAdmin ? '<span style="margin-left:auto;font-size:0.6rem;color:#94a3b8;">solo Admin</span>' : ''}
+                </label>`;
+            }).join('');
+        }
+
+        function nuToggleModulo(id, el) {
+            const rol = document.getElementById('nu-rol').value;
+            if (rol === 'Administrador') { showToast('ℹ️ Los Administradores siempre tienen todos los módulos', 'info'); return; }
+            if (id === 'ajustes' && rol !== 'Administrador') { showToast('⚠️ El módulo Ajustes solo puede tenerlo un Administrador', 'warning'); return; }
+            const cb = el.querySelector('input[type=checkbox]');
+            if (!cb || cb.disabled) return;
+            cb.checked = !cb.checked;
+            el.style.background = cb.checked ? 'rgba(59,130,246,0.18)' : 'var(--accent)';
+            el.style.borderColor = cb.checked ? 'var(--primary)' : 'var(--accent)';
+        }
+
+        function _modulosMarcados() {
+            return Array.from(document.querySelectorAll('#nu-modulos input[type=checkbox]:checked')).map(c => c.getAttribute('data-mod'));
+        }
+
+        function nuRolCambio() {
+            const rol = document.getElementById('nu-rol').value;
+            if (rol === 'Administrador') { _renderModulosSelector(_MODULOS_APP.map(m => m.id)); return; }
+            const marcados = _modulosMarcados();
+            _renderModulosSelector(marcados.length ? marcados : _modulosPorRol(rol));
+        }
+
+        let _usuariosCache = [];
+
         async function renderUsuarios() {
             try {
                 const response = await apiFetch(`${API}/usuarios`);
                 const usuarios = await response.json();
+                _usuariosCache = Array.isArray(usuarios) ? usuarios : [];
 
                 let html = '<div style="margin-bottom: 20px;"><button onclick="nuevoUsuario()" class="nav-btn active" style="margin: 0; text-align: center;">➕ AGREGAR USUARIO</button></div>';
                 html += `<table><thead><tr>
-                    <th>Usuario</th><th>Rol</th><th>Último Acceso</th><th>Estado</th><th>Acciones</th>
+                    <th>Usuario</th><th>Rol</th><th>Módulos</th><th>Último Acceso</th><th>Estado</th><th>Acciones</th>
                 </tr></thead><tbody>`;
 
                 usuarios.forEach(u => {
@@ -7088,15 +7308,19 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                         <tr style="${!activo ? 'opacity:0.5;' : ''}">
                             <td><strong>${u.username}</strong></td>
                             <td><span class="check-pill active">${u.rol}</span></td>
+                            <td style="max-width:220px;">${_badgeModulos(u.modulos)}</td>
                             <td style="font-size:0.78rem;color:#94a3b8;">${ultimoLogin}</td>
                             <td>${estadoBadge}</td>
                             <td>
-                                <button onclick="editarUsuario(${u.id}, '${u.username}', '${u.rol}')" style="background: var(--info); color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; margin-right: 5px; font-size:0.8rem;">✏️ Editar</button>
+                                <button onclick="editarUsuario(${u.id})" style="background: var(--info); color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; margin-right: 5px; font-size:0.8rem;">✏️ Editar</button>
                                 ${u.id !== 1 ? `
                                     <button onclick="toggleActivoUsuario(${u.id}, '${u.username}', ${activo ? 0 : 1})" 
                                         style="background: ${activo ? 'var(--warning)' : 'var(--success)'}; color: ${activo ? 'black' : 'white'}; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size:0.8rem;">
                                         ${activo ? '⏸ Desactivar' : '▶ Activar'}
                                     </button>
+                                    ${!LoginModule.esMiUsuario(u.id) ? `
+                                        <button onclick="eliminarUsuario(${u.id})" style="background: linear-gradient(135deg, #f43f5e, #dc2626); color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size:0.8rem; font-weight:bold; box-shadow: 0 2px 8px rgba(220,38,38,0.4);">🗑 Eliminar</button>
+                                    ` : ''}
                                 ` : '<span style="color:#475569;font-size:0.75rem;">Admin principal</span>'}
                             </td>
                         </tr>
@@ -7116,19 +7340,30 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             document.getElementById('usuario-modal-title').innerText = 'Agregar Usuario';
             document.getElementById('nu-id').value = '';
             document.getElementById('nu-username').value = '';
+            document.getElementById('nu-username').disabled = false;
             document.getElementById('nu-password').value = '';
+            document.getElementById('nu-password').placeholder = 'Mínimo 6 caracteres';
             document.getElementById('nu-rol').value = 'Técnico';
+            _renderModulosSelector(_modulosPorRol('Técnico'));
             document.getElementById('modal-usuario').style.display = 'flex';
         }
 
-        function editarUsuario(id, username, rol) {
+        function editarUsuario(id) {
+            const u = _usuariosCache.find(x => String(x.id) === String(id));
+            if (!u) {
+                showToast('❌ Usuario no encontrado', 'error');
+                return;
+            }
             document.getElementById('usuario-modal-title').innerText = 'Editar Usuario';
-            document.getElementById('nu-id').value = id;
-            document.getElementById('nu-username').value = username;
+            document.getElementById('nu-id').value = u.id;
+            document.getElementById('nu-username').value = u.username;
             document.getElementById('nu-username').disabled = true;
             document.getElementById('nu-password').value = '';
             document.getElementById('nu-password').placeholder = 'Dejar vacío para no cambiar';
-            document.getElementById('nu-rol').value = rol;
+            document.getElementById('nu-rol').value = u.rol;
+            const sel = (Array.isArray(u.modulos) && u.modulos[0] === '*') ? _MODULOS_APP.map(m => m.id)
+                : (Array.isArray(u.modulos) && u.modulos.length ? u.modulos : _modulosPorRol(u.rol));
+            _renderModulosSelector(sel);
             document.getElementById('modal-usuario').style.display = 'flex';
         }
 
@@ -7137,6 +7372,7 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             const username = document.getElementById('nu-username').value.trim();
             const password = document.getElementById('nu-password').value;
             const rol = document.getElementById('nu-rol').value;
+            const modulos = _modulosMarcados();
 
             if (!username) {
                 showToast('❌ El nombre de usuario es obligatorio', 'error');
@@ -7155,19 +7391,23 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
 
             try {
                 if (id) {
-                    if (password) {
-                        await apiFetch(`${API}/usuarios/${id}`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ password })
-                        });
-                    }
+                    const body = { modulos };
+                    if (password) body.password = password;
+                    await apiFetch(`${API}/usuarios/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    });
                     showToast('✅ Usuario actualizado', 'success');
+                    if (typeof LoginModule !== 'undefined' && LoginModule.esMiUsuario(Number(id))) {
+                        const eff = rol === 'Administrador' ? ['*'] : (modulos.length ? modulos : _modulosPorRol(rol));
+                        LoginModule.actualizarMisModulos(eff);
+                    }
                 } else {
                     const response = await apiFetch(`${API}/usuarios`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username, password, rol })
+                        body: JSON.stringify({ username, password, rol, modulos })
                     });
 
                     const data = await response.json();
@@ -7188,11 +7428,18 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             }
         }
 
-        async function eliminarUsuario(id, username) {
-            if (!confirm(`¿Eliminar el usuario "${username}"?`)) return;
+        async function eliminarUsuario(id) {
+            const u = _usuariosCache.find(x => String(x.id) === String(id));
+            if (!u) return;
+            if (!confirm(`¿Eliminar definitivamente al usuario "${u.username}"?\n\nEsta acción no se puede deshacer.`)) return;
             try {
-                await apiFetch(`${API}/usuarios/${id}`, { method: 'DELETE' });
-                showToast('✅ Usuario desactivado', 'success');
+                const response = await apiFetch(`${API}/usuarios/${id}`, { method: 'DELETE' });
+                const data = await response.json().catch(() => ({}));
+                if (!data.success) {
+                    showToast('❌ ' + (data.error || 'No se pudo eliminar'), 'error');
+                    return;
+                }
+                showToast('🗑 Usuario eliminado', 'success');
                 await renderAjustes();
             } catch (error) {
                 if (error.message !== 'ACCESS_DENIED') showToast('❌ Error al eliminar usuario', 'error');
@@ -7469,6 +7716,9 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                         // Guardar el JWT en memoria
                         setAuthToken(data.token);
                         currentUser = data.user;
+                        _misModulos = (Array.isArray(data.user?.modulos) && data.user.modulos.length)
+                            ? data.user.modulos
+                            : _modulosPorRol(data.user?.rol);
 
                         document.getElementById('login-screen').classList.add('hidden');
                         document.getElementById('app-container').classList.add('active');
@@ -7479,13 +7729,9 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                         aplicarPermisosDeRol();
                         await sync();
 
-                        if (currentUser.rol === 'Técnico') {
-                            nav('taller');
-                        } else if (currentUser.rol === 'Vendedor') {
-                            nav('ventas');
-                        } else {
-                            nav('recepcion');
-                        }
+                        const pref = currentUser.rol === 'Técnico' ? 'taller' : currentUser.rol === 'Vendedor' ? 'ventas' : 'recepcion';
+                        const destino = _puedeAccederModulo(pref) ? pref : (_MODULOS_APP.find(m => _puedeAccederModulo(m.id))?.id || 'recepcion');
+                        nav(destino);
 
                         showToast(`✅ Bienvenido, ${currentUser.username} (${currentUser.rol})`, 'success');
                     } else {
@@ -7505,8 +7751,6 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             }
 
             function aplicarPermisosDeRol() {
-                const rol = currentUser.rol;
-
                 const sidebar = document.querySelector('.sidebar h2');
                 if (sidebar) {
                     sidebar.innerHTML = `
@@ -7525,24 +7769,13 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                     if (btn) btn.style.display = 'none';
                 });
 
-                if (rol === 'Administrador') {
-                    todosLosBotones.forEach(id => {
-                        const btn = document.getElementById(id);
-                        if (btn) btn.style.display = 'block';
-                    });
-                }
-                else if (rol === 'Técnico') {
-                    ['btn-recepcion', 'btn-taller', 'btn-partes', 'btn-clientes'].forEach(id => {
-                        const btn = document.getElementById(id);
-                        if (btn) btn.style.display = 'block';
-                    });
-                }
-                else if (rol === 'Vendedor') {
-                    ['btn-ventas', 'btn-clientes'].forEach(id => {
-                        const btn = document.getElementById(id);
-                        if (btn) btn.style.display = 'block';
-                    });
-                }
+                const mods = _misModulos;
+                const esAdmin = mods.includes('*');
+                _MODULOS_APP.forEach(m => {
+                    const btn = document.getElementById('btn-' + m.id);
+                    if (!btn) return;
+                    btn.style.display = (esAdmin || mods.includes(m.id)) ? 'block' : 'none';
+                });
 
                 agregarBotonCerrarSesion();
             }
@@ -7571,6 +7804,7 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                 document.getElementById('modal-confirm-logout').classList.remove('show');
                 clearAuthToken(); // 🔒 Limpiar JWT al cerrar sesión
                 currentUser = null;
+                _misModulos = [];
                 showToast('👋 Sesión cerrada', 'info');
                 setTimeout(() => {
                     location.reload();
@@ -7614,6 +7848,16 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                 return currentUser;
             }
 
+            function esMiUsuario(id) {
+                return currentUser && String(currentUser.id) === String(id);
+            }
+
+            function actualizarMisModulos(modulos) {
+                _misModulos = (Array.isArray(modulos) && modulos.length) ? modulos.slice() : _modulosPorRol(currentUser?.rol);
+                if (currentUser) currentUser.modulos = _misModulos;
+                aplicarPermisosDeRol();
+            }
+
             function init() {
                 setupEnterKey();
             }
@@ -7622,7 +7866,9 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                 init,
                 iniciarSesion,
                 cerrarSesion,
-                getCurrentUser
+                getCurrentUser,
+                esMiUsuario,
+                actualizarMisModulos
             };
         })();
 
@@ -8388,6 +8634,10 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
         const originalNav = nav;
         let _chatbotRendered = false;
         nav = async function (v) {
+            if (!_puedeAccederModulo(v)) {
+                showToast('🚫 No tenés acceso a este módulo', 'error');
+                return;
+            }
             const contentArea = document.getElementById('content-area');
             const chatbotContainer = document.getElementById('chatbot-container');
             if (v === 'chatbot') {
@@ -8666,12 +8916,12 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
         ];
 
         let _npIdx = -1;
+        let _npServerCats = [];
 
         function npGetCats() {
             const base = [...NP_CAT_DEFAULT];
-            // Agregar categorías custom del servidor que no estén en la lista base
-            const serverCats = [...new Set(_partesCache.map(p => p.categoria))].filter(c => !base.includes(c));
-            return [...base, ...serverCats];
+            const extra = (_npServerCats || []).filter(c => c && !base.includes(c));
+            return [...base, ...extra];
         }
 
         function npRenderDropdown(q, keepIdx) {
@@ -8721,6 +8971,14 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             else if (e.key === 'Tab') { if (visible) { const first = dd.querySelector('[data-idx]'); if (first) { e.preventDefault(); npSeleccionarCat(first); } } }
         }
 
+        function npEnterNext(e, nextId) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const next = document.getElementById(nextId);
+                if (next) next.focus();
+            }
+        }
+
         function npFiltrarCat(q) {
             npRenderDropdown(q);
             const match = npGetCats().find(c => c.toLowerCase() === q.toLowerCase());
@@ -8746,7 +9004,7 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             npCerrarDropdown();
         }
 
-        function npAgregarCategoria() {
+        async function npAgregarCategoria() {
             const input = document.getElementById('np-categoria-input');
             const val = (input ? input.value : '').trim();
             if (!val) { showToast('⚠️ Escribí el nombre primero', 'warning'); input && input.focus(); return; }
@@ -8761,8 +9019,124 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             if (typeof CAT_COLORS_P !== 'undefined') CAT_COLORS_P[val] = '#6b7280';
             document.getElementById('np-categoria').value = val;
             document.getElementById('np-categoria-input').value = val;
+            if (!_npServerCats.includes(val)) {
+                _npServerCats.push(val);
+                try {
+                    await apiFetch(`${API}/productos/categorias`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ nombre: val })
+                    });
+                } catch(e) { showToast('⚠️ No se pudo guardar en el servidor', 'warning'); }
+            }
             showToast(`✅ "${val}" agregada como categoría`, 'success');
-            npCerrarDropdown();
+            npRenderDropdown('');
+            npHighlight(_npServerCats.length >= 0 ? Math.max(0, NP_CAT_DEFAULT.length + _npServerCats.length - 1) : -1);
+        }
+
+        async function _refrescarNpServerCats() {
+            try {
+                const r = await apiFetch(`${API}/productos/categorias`);
+                const rows = await r.json();
+                _npServerCats = (rows || []).map(x => x.nombre);
+            } catch(e) {}
+        }
+
+        async function abrirGestionCategorias() {
+            document.getElementById('modal-gestion-categorias').style.display = 'flex';
+            const lista = document.getElementById('gc-lista');
+            lista.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:.85rem;">⏳ Cargando...</div>';
+            await _cargarListaCategorias();
+            const nuevo = document.getElementById('gc-nuevo');
+            if (nuevo) setTimeout(function() { nuevo.focus(); }, 50);
+        }
+
+        function cerrarGestionCategorias() {
+            document.getElementById('modal-gestion-categorias').style.display = 'none';
+        }
+
+        async function _cargarListaCategorias() {
+            const lista = document.getElementById('gc-lista');
+            if (!lista) return;
+            try {
+                const r = await apiFetch(`${API}/productos/categorias`);
+                const rows = await r.json();
+                if (!rows || rows.length === 0) {
+                    lista.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:.85rem;">Sin categorías aún. Agregá la primera arriba.</div>';
+                    return;
+                }
+                lista.innerHTML = rows.map(c => {
+                    const esc = c.nombre.replace(/"/g, '&quot;');
+                    return '<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:rgba(0,0,0,0.15);border-radius:8px;margin-bottom:6px;font-size:.88rem;">' +
+                        '<div style="flex:1;min-width:0;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + c.nombre + '</div>' +
+                        '<button onclick="editarCategoria(' + c.id + ', \'' + esc.replace(/'/g, "\\'") + '\')" style="background:var(--accent);color:#94a3b8;border:none;border-radius:6px;padding:5px 9px;cursor:pointer;font-size:.75rem;">✏️</button>' +
+                        '<button onclick="eliminarCategoria(' + c.id + ', \'' + esc.replace(/'/g, "\\'") + '\')" style="background:transparent;color:var(--primary);border:none;border-radius:6px;padding:5px 9px;cursor:pointer;font-size:.75rem;">🗑️</button>' +
+                        '</div>';
+                }).join('');
+            } catch(e) {
+                lista.innerHTML = '<div style="padding:20px;text-align:center;color:var(--primary);font-size:.85rem;">❌ Error al cargar categorías</div>';
+            }
+        }
+
+        async function guardarCategoriaModal() {
+            const input = document.getElementById('gc-nuevo');
+            const val = (input ? input.value : '').trim();
+            if (!val) { showToast('⚠️ Escribí un nombre', 'warning'); if (input) input.focus(); return; }
+            try {
+                const r = await apiFetch(`${API}/productos/categorias`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ nombre: val })
+                });
+                const res = await r.json();
+                if (res.success) {
+                    if (input) input.value = '';
+                    await _refrescarNpServerCats();
+                    await _cargarListaCategorias();
+                    showToast('✅ Categoría agregada', 'success');
+                    if (input) input.focus();
+                } else {
+                    showToast('❌ ' + (res.error || 'Error al agregar'), 'error');
+                }
+            } catch(e) { showToast('❌ Error de conexión', 'error'); }
+        }
+
+        async function editarCategoria(id, nombre) {
+            const nuevo = prompt('Nuevo nombre para la categoría:', nombre);
+            if (nuevo === null) return;
+            const val = nuevo.trim();
+            if (!val) { showToast('⚠️ Nombre vacío', 'warning'); return; }
+            if (val.toLowerCase() === (nombre || '').toLowerCase()) return;
+            try {
+                const r = await apiFetch(`${API}/productos/categorias/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ nombre: val })
+                });
+                const res = await r.json();
+                if (res.success) {
+                    await _refrescarNpServerCats();
+                    await _cargarListaCategorias();
+                    showToast('✅ Categoría renombrada', 'success');
+                } else {
+                    showToast('❌ ' + (res.error || 'Error al renombrar'), 'error');
+                }
+            } catch(e) { showToast('❌ Error de conexión', 'error'); }
+        }
+
+        async function eliminarCategoria(id, nombre) {
+            if (!confirm('¿Eliminar la categoría "' + nombre + '"? Los productos existentes no se modifican.')) return;
+            try {
+                const r = await apiFetch(`${API}/productos/categorias/${id}`, { method: 'DELETE' });
+                const res = await r.json();
+                if (res.success) {
+                    await _refrescarNpServerCats();
+                    await _cargarListaCategorias();
+                    showToast('🗑️ Categoría eliminada', 'success');
+                } else {
+                    showToast('❌ ' + (res.error || 'Error al eliminar'), 'error');
+                }
+            } catch(e) { showToast('❌ Error de conexión', 'error'); }
         }
 
 

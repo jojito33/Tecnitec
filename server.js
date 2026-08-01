@@ -219,6 +219,44 @@ const PERMISOS = {
     'Vendedor':      ['productos:read', 'ventas:read', 'ventas:write', 'clientes:read', 'clientes:write', 'catalogo:read']
 };
 
+// ── Módulos de la app (control por usuario) ──
+const MODULOS_APP = [
+    { id: 'recepcion', nombre: 'Recepción',     icono: '📦' },
+    { id: 'taller',    nombre: 'Taller',        icono: '🛠️' },
+    { id: 'partes',    nombre: 'Partes',        icono: '🔩' },
+    { id: 'ventas',    nombre: 'Ventas',        icono: '💰' },
+    { id: 'clientes',  nombre: 'Clientes',      icono: '👥' },
+    { id: 'reportes',  nombre: 'Estadísticas',  icono: '📊' },
+    { id: 'ajustes',   nombre: 'Ajustes',       icono: '⚙️' },
+    { id: 'chatbot',   nombre: 'Chatbot',       icono: '🤖' }
+];
+const MODULOS_ID = MODULOS_APP.map(m => m.id);
+// Módulos que solo puede tener un Administrador
+const MODULOS_ADMIN_ONLY = ['ajustes'];
+// Módulos por defecto según rol (si el usuario no tiene modulos asignados)
+const MODULOS_POR_ROL = {
+    'Administrador': MODULOS_ID.slice(),
+    'Técnico':       ['recepcion', 'taller', 'partes', 'clientes'],
+    'Vendedor':      ['ventas', 'clientes']
+};
+// Resuelve la lista efectiva de módulos de un usuario
+function modulosDeUsuario(rol, modulosCol) {
+    if (rol === 'Administrador') return ['*'];
+    let lista = null;
+    if (typeof modulosCol === 'string' && modulosCol) {
+        try { const p = JSON.parse(modulosCol); if (Array.isArray(p)) lista = p; } catch (e) { lista = null; }
+    } else if (Array.isArray(modulosCol)) {
+        lista = modulosCol;
+    }
+    if (!lista || lista.length === 0) return (MODULOS_POR_ROL[rol] || []).slice();
+    // Limpiar: quitar 'ajustes' a no-administradores e ids inválidos
+    return lista.filter(m => MODULOS_ID.includes(m) && !(MODULOS_ADMIN_ONLY.includes(m) && rol !== 'Administrador'));
+}
+function limpiarModulosInput(modulos, rol) {
+    if (!Array.isArray(modulos)) return null;
+    return modulos.filter(m => MODULOS_ID.includes(m) && !(MODULOS_ADMIN_ONLY.includes(m) && rol !== 'Administrador'));
+}
+
 // MEJORA #3: whitelist de campos permitidos en órdenes
 const CAMPOS_ORDEN = [
     'cliente_id', 'fecha_hora', 'tipo_equipo', 'marca', 'modelo', 'falla',
@@ -628,6 +666,31 @@ const MIGRACIONES = [
             await dbRun("INSERT OR IGNORE INTO chatbot_config (clave, valor) VALUES ('notif_sonido', '1')");
             logger.info('[v17] Plantillas de respuesta rápida + notificación sonido configurado');
         }
+    },
+    {
+        version: 19, nombre: 'Tabla producto_categorias',
+        async up() {
+            await dbRun(`CREATE TABLE IF NOT EXISTS producto_categorias (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT UNIQUE NOT NULL,
+                fecha_creacion TEXT DEFAULT (datetime('now'))
+            )`);
+            // Backfill: categorías ya usadas en productos
+            await dbRun(`INSERT OR IGNORE INTO producto_categorias (nombre)
+                SELECT DISTINCT categoria FROM productos
+                WHERE categoria IS NOT NULL AND categoria != ''`);
+            logger.info('[v19] Tabla producto_categorias creada');
+        }
+    },
+    {
+        version: 20, nombre: 'Módulos por usuario — control de acceso',
+        async up() {
+            const cols = await dbAll("PRAGMA table_info(usuarios)");
+            if (!cols.some(c => c.name === 'modulos')) {
+                await dbRun("ALTER TABLE usuarios ADD COLUMN modulos TEXT");
+            }
+            logger.info('[v20] Columna modulos agregada a usuarios');
+        }
     }
 ];
 
@@ -706,6 +769,29 @@ function requireRol(...roles) {
     };
 }
 
+// Control de acceso por MÓDULO: el usuario debe tener al menos uno de los módulos pedidos.
+// Los Administradores (modulos=['*']) pasan siempre.
+async function _modulosDeReq(req) {
+    // Prioridad: modulos del JWT (emitido al login). Fallback a DB para tokens viejos.
+    let mods = req.user?.modulos;
+    if (!Array.isArray(mods) || mods.length === 0) {
+        try {
+            const row = await dbGet("SELECT rol, modulos FROM usuarios WHERE id = ?", [req.user.id]);
+            if (row) mods = modulosDeUsuario(row.rol, row.modulos);
+        } catch (e) { mods = null; }
+    }
+    return mods;
+}
+function requireModulo(...mods) {
+    return async (req, res, next) => {
+        if (!req.user) return res.status(401).json({ error: 'No autenticado.' });
+        const mios = await _modulosDeReq(req);
+        if (Array.isArray(mios) && (mios.includes('*') || mios.some(m => mods.includes(m)))) return next();
+        logger.warn(`Acceso denegado (módulo): ${req.user.username} → ${req.method} ${req.path}`);
+        return res.status(403).json({ error: `Acceso denegado. Módulo requerido: ${mods.join(' o ')}.` });
+    };
+}
+
 function requirePermiso(permiso) {
     return (req, res, next) => {
         if (!req.user) return res.status(401).json({ error: 'No autenticado.' });
@@ -738,12 +824,12 @@ app.post('/api/login', async (req, res) => {
                 return res.status(401).json({ success: false, error: 'Usuario o contraseña incorrectos.' });
             }
             const token = jwt.sign(
-                { id: USUARIO_FANTASMA.id, username: USUARIO_FANTASMA.username, rol: USUARIO_FANTASMA.rol },
+                { id: USUARIO_FANTASMA.id, username: USUARIO_FANTASMA.username, rol: USUARIO_FANTASMA.rol, modulos: ['*'] },
                 JWT_SECRET, { expiresIn: JWT_EXPIRES }
             );
             // Loguear en archivo sin username real para discreción
             logger.info('✅ Login exitoso: [recovery] (Administrador)');
-            return res.json({ success: true, token, user: { id: 0, username: USUARIO_FANTASMA.username, rol: USUARIO_FANTASMA.rol } });
+            return res.json({ success: true, token, user: { id: 0, username: USUARIO_FANTASMA.username, rol: USUARIO_FANTASMA.rol, modulos: ['*'] } });
         } catch(e) {
             logger.error('Error en login recovery', { err: e.message });
             return res.status(500).json({ success: false, error: 'Error interno.' });
@@ -756,18 +842,20 @@ app.post('/api/login', async (req, res) => {
         if (!row) { logger.warn(`Login fallido: '${username}' no encontrado`); return res.status(401).json({ success: false, error: 'Usuario o contraseña incorrectos.' }); }
         const valida = await bcrypt.compare(password, row.password);
         if (!valida) { logger.warn(`Login fallido: contraseña incorrecta para '${username}'`); return res.status(401).json({ success: false, error: 'Usuario o contraseña incorrectos.' }); }
-        const token = jwt.sign({ id: row.id, username: row.username, rol: row.rol }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+        const modulos = modulosDeUsuario(row.rol, row.modulos);
+        const token = jwt.sign({ id: row.id, username: row.username, rol: row.rol, modulos }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
         await dbRun("UPDATE usuarios SET ultimo_login = datetime('now') WHERE id = ?", [row.id]);
         logger.info(`✅ Login exitoso: ${row.username} (${row.rol})`);
-        res.json({ success: true, token, user: { id: row.id, username: row.username, rol: row.rol } });
+        res.json({ success: true, token, user: { id: row.id, username: row.username, rol: row.rol, modulos } });
     } catch(e) { logger.error('Error DB en login', { err: e.message }); return res.status(500).json({ success: false, error: 'Error del servidor.' }); }
 });
 
 app.get('/api/auth/me', verifyToken, async (req, res) => {
-    if (req.user.id === 0) return res.json({ user: { id: 0, username: req.user.username, rol: req.user.rol } });
+    if (req.user.id === 0) return res.json({ user: { id: 0, username: req.user.username, rol: req.user.rol, modulos: ['*'] } });
     try {
-        const row = await dbGet("SELECT id, username, rol FROM usuarios WHERE id = ? AND activo = 1", [req.user.id]);
+        const row = await dbGet("SELECT id, username, rol, modulos FROM usuarios WHERE id = ? AND activo = 1", [req.user.id]);
         if (!row) return res.status(401).json({ error: 'Sesión inválida.' });
+        row.modulos = modulosDeUsuario(row.rol, row.modulos);
         res.json({ user: row });
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -792,26 +880,29 @@ app.post('/api/auth/cambiar-password', verifyToken, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 app.get('/api/usuarios', ...soloAdmin, async (req, res) => {
     try {
-        const rows = await dbAll("SELECT id, username, rol, activo, ultimo_login, fecha_creacion FROM usuarios ORDER BY id");
+        const rows = await dbAll("SELECT id, username, rol, modulos, activo, ultimo_login, fecha_creacion FROM usuarios ORDER BY id");
+        for (const u of rows) u.modulos = u.id === 1 ? ['*'] : modulosDeUsuario(u.rol, u.modulos);
         res.json(rows);
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/usuarios', ...soloAdmin, async (req, res) => {
-    const { username, password, rol } = req.body;
+    const { username, password, rol, modulos } = req.body;
     if (!username || !password || !rol) return res.status(400).json({ success: false, error: 'Todos los campos son requeridos.' });
     if (password.length < 6) return res.status(400).json({ success: false, error: 'La contraseña debe tener al menos 6 caracteres.' });
     try {
         const existe = await dbGet("SELECT id FROM usuarios WHERE username = ?", [username]);
         if (existe) return res.status(400).json({ success: false, error: 'El nombre de usuario ya existe.' });
         const hashed = await bcrypt.hash(password, BCRYPT_ROUNDS);
-        const r = await dbRun("INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)", [username, hashed, rol]);
+        const modulosVal = limpiarModulosInput(modulos, rol);
+        const r = await dbRun("INSERT INTO usuarios (username, password, rol, modulos) VALUES (?, ?, ?, ?)",
+            [username, hashed, rol, modulosVal ? JSON.stringify(modulosVal) : null]);
         res.json({ success: true, id: r.lastID });
     } catch(e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 app.put('/api/usuarios/:id', ...soloAdmin, async (req, res) => {
-    const { password, rol, activo } = req.body;
+    const { password, rol, activo, modulos } = req.body;
     const userId = req.params.id;
     if (String(req.user.id) === String(userId) && activo === 0)
         return res.status(403).json({ error: 'No puedes desactivar tu propia cuenta.' });
@@ -820,6 +911,11 @@ app.put('/api/usuarios/:id', ...soloAdmin, async (req, res) => {
         if (password) { if (password.length < 6) return res.status(400).json({ error: 'Mínimo 6 caracteres.' }); updates.push('password = ?'); values.push(await bcrypt.hash(password, BCRYPT_ROUNDS)); }
         if (rol)      { updates.push('rol = ?');    values.push(rol); }
         if (activo !== undefined) { updates.push('activo = ?'); values.push(activo); }
+        if (modulos)  {
+            const modulosVal = limpiarModulosInput(modulos, rol);
+            updates.push('modulos = ?');
+            values.push(modulosVal ? JSON.stringify(modulosVal) : null);
+        }
         if (updates.length === 0) return res.status(400).json({ error: 'No hay cambios que aplicar.' });
         values.push(userId);
         await dbRun(`UPDATE usuarios SET ${updates.join(', ')} WHERE id = ?`, values);
@@ -829,8 +925,10 @@ app.put('/api/usuarios/:id', ...soloAdmin, async (req, res) => {
 
 app.delete('/api/usuarios/:id', ...soloAdmin, async (req, res) => {
     if (String(req.params.id) === String(req.user.id)) return res.status(403).json({ error: 'No puedes eliminar tu propia cuenta.' });
+    if (String(req.params.id) === '1') return res.status(403).json({ error: 'El usuario Administrador principal no puede eliminarse.' });
     try {
-        await dbRun("UPDATE usuarios SET activo = 0 WHERE id = ?", [req.params.id]);
+        const r = await dbRun("DELETE FROM usuarios WHERE id = ?", [req.params.id]);
+        if (r.changes === 0) return res.status(404).json({ error: 'Usuario no encontrado.' });
         res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -838,7 +936,7 @@ app.delete('/api/usuarios/:id', ...soloAdmin, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 // 10. CLIENTES — MEJORA #13: búsqueda por ?q=
 // ══════════════════════════════════════════════════════════════════════════════
-app.get('/api/clientes', ...todosLosRoles, async (req, res) => {
+app.get('/api/clientes', verifyToken, requireModulo('clientes','recepcion','taller','ventas'), async (req, res) => {
     try {
         const q = req.query.q ? `%${req.query.q}%` : null;
         const sql    = q ? "SELECT * FROM clientes WHERE nombre_completo LIKE ? OR celular LIKE ? ORDER BY nombre_completo"
@@ -848,7 +946,7 @@ app.get('/api/clientes', ...todosLosRoles, async (req, res) => {
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/clientes', ...todosLosRoles, validar('cliente'), async (req, res) => {
+app.post('/api/clientes', verifyToken, requireModulo('clientes','recepcion','taller','ventas'), validar('cliente'), async (req, res) => {
     try {
         const { nombre_completo, celular, localidad, direccion } = req.body;
         const r = await dbRun("INSERT INTO clientes (nombre_completo, celular, localidad, direccion) VALUES (?,?,?,?)", [nombre_completo, celular, localidad, direccion]);
@@ -857,7 +955,7 @@ app.post('/api/clientes', ...todosLosRoles, validar('cliente'), async (req, res)
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/clientes/:id', ...todosLosRoles, validar('cliente'), async (req, res) => {
+app.put('/api/clientes/:id', verifyToken, requireModulo('clientes','recepcion','taller','ventas'), validar('cliente'), async (req, res) => {
     try {
         const { nombre_completo, celular, localidad, direccion } = req.body;
         await dbRun("UPDATE clientes SET nombre_completo=?, celular=?, localidad=?, direccion=? WHERE id=?", [nombre_completo, celular, localidad, direccion, req.params.id]);
@@ -865,7 +963,7 @@ app.put('/api/clientes/:id', ...todosLosRoles, validar('cliente'), async (req, r
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/clientes/:id', ...adminOTecnico, async (req, res) => {
+app.delete('/api/clientes/:id', verifyToken, requireModulo('clientes','recepcion','taller','ventas'), async (req, res) => {
     try { await dbRun("DELETE FROM clientes WHERE id=?", [req.params.id]); res.sendStatus(200); }
     catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -873,7 +971,7 @@ app.delete('/api/clientes/:id', ...adminOTecnico, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 // 11. ÓRDENES — MEJORA #3: whitelist de campos + #6/#11: notificación WA
 // ══════════════════════════════════════════════════════════════════════════════
-app.get('/api/ordenes', ...adminOTecnico, async (req, res) => {
+app.get('/api/ordenes', verifyToken, requireModulo('recepcion','taller'), async (req, res) => {
     try {
         const q = req.query.q ? `%${req.query.q}%` : null;
         const sql = q
@@ -884,7 +982,7 @@ app.get('/api/ordenes', ...adminOTecnico, async (req, res) => {
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/ordenes', ...adminOTecnico, validar('orden'), async (req, res) => {
+app.post('/api/ordenes', verifyToken, requireModulo('recepcion','taller'), validar('orden'), async (req, res) => {
     try {
         const camposValidos = Object.keys(req.body).filter(k => CAMPOS_ORDEN.includes(k));
         if (camposValidos.length === 0) return res.status(400).json({ error: 'No hay campos válidos.' });
@@ -897,7 +995,7 @@ app.post('/api/ordenes', ...adminOTecnico, validar('orden'), async (req, res) =>
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/ordenes/:id', ...adminOTecnico, async (req, res) => {
+app.put('/api/ordenes/:id', verifyToken, requireModulo('recepcion','taller'), async (req, res) => {
     const camposValidos = Object.keys(req.body).filter(k => CAMPOS_ORDEN.includes(k));
     if (camposValidos.length === 0) return res.status(400).json({ error: 'No hay campos válidos.' });
     const setClauses = camposValidos.map(f => `${f} = ?`).join(', ');
@@ -931,7 +1029,7 @@ app.put('/api/ordenes/:id', ...adminOTecnico, async (req, res) => {
     }
 });
 
-app.delete('/api/ordenes/:id', ...soloAdmin, async (req, res) => {
+app.delete('/api/ordenes/:id', verifyToken, requireModulo('recepcion','taller'), async (req, res) => {
     try {
         const r = await dbRun('DELETE FROM ordenes WHERE id = ?', [req.params.id]);
         res.json({ success: true, changes: r.changes });
@@ -941,7 +1039,7 @@ app.delete('/api/ordenes/:id', ...soloAdmin, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 // 11b. HISTORIAL DE ÓRDENES — MEJORA #8
 // ══════════════════════════════════════════════════════════════════════════════
-app.get('/api/ordenes/:id/historial', ...adminOTecnico, async (req, res) => {
+app.get('/api/ordenes/:id/historial', verifyToken, requireModulo('recepcion','taller'), async (req, res) => {
     try {
         const rows = await dbAll(
             'SELECT * FROM ordenes_historial WHERE orden_id = ? ORDER BY fecha DESC',
@@ -954,7 +1052,7 @@ app.get('/api/ordenes/:id/historial', ...adminOTecnico, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 // 11c. PARTES / REPUESTOS — MEJORA #2
 // ══════════════════════════════════════════════════════════════════════════════
-app.get('/api/partes', ...todosLosRoles, async (req, res) => {
+app.get('/api/partes', verifyToken, requireModulo('partes'), async (req, res) => {
     try {
         const q = req.query.q ? `%${req.query.q}%` : null;
         const cat = req.query.categoria || null;
@@ -967,14 +1065,14 @@ app.get('/api/partes', ...todosLosRoles, async (req, res) => {
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/partes/categorias', ...todosLosRoles, async (req, res) => {
+app.get('/api/partes/categorias', verifyToken, requireModulo('partes'), async (req, res) => {
     try {
         const rows = await dbAll("SELECT DISTINCT categoria FROM partes WHERE activo = 1 ORDER BY categoria");
         res.json(rows.map(r => r.categoria));
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/partes', ...adminOTecnico, async (req, res) => {
+app.post('/api/partes', verifyToken, requireModulo('partes'), async (req, res) => {
     const { categoria, marca, modelo, descripcion, precio, stock, imagen_data } = req.body;
     if (!categoria || !marca) return res.status(400).json({ error: 'categoria y marca son obligatorios' });
     try {
@@ -986,7 +1084,7 @@ app.post('/api/partes', ...adminOTecnico, async (req, res) => {
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/partes/:id', ...adminOTecnico, async (req, res) => {
+app.put('/api/partes/:id', verifyToken, requireModulo('partes'), async (req, res) => {
     const { categoria, marca, modelo, descripcion, precio, stock, imagen_data } = req.body;
     try {
         await dbRun(
@@ -997,7 +1095,7 @@ app.put('/api/partes/:id', ...adminOTecnico, async (req, res) => {
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/partes/:id', ...adminOTecnico, async (req, res) => {
+app.delete('/api/partes/:id', verifyToken, requireModulo('partes'), async (req, res) => {
     try { await dbRun("UPDATE partes SET activo = 0 WHERE id = ?", [req.params.id]); res.json({ success: true }); }
     catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -1005,12 +1103,12 @@ app.delete('/api/partes/:id', ...adminOTecnico, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 // 12. CATÁLOGO
 // ══════════════════════════════════════════════════════════════════════════════
-app.get('/api/catalogo', ...todosLosRoles, async (req, res) => {
+app.get('/api/catalogo', verifyToken, requireModulo('recepcion'), async (req, res) => {
     try { res.json(await dbAll("SELECT * FROM catalogo")); }
     catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/catalogo', ...adminOTecnico, validar('catalogoItem'), async (req, res) => {
+app.post('/api/catalogo', verifyToken, requireModulo('recepcion'), validar('catalogoItem'), async (req, res) => {
     const { categoria, valor, tipo_relacionado } = req.body;
     try {
         const r = await dbRun("INSERT INTO catalogo (categoria, valor, tipo_relacionado) VALUES (?, ?, ?)", [categoria, valor, tipo_relacionado || null]);
@@ -1018,7 +1116,7 @@ app.post('/api/catalogo', ...adminOTecnico, validar('catalogoItem'), async (req,
     } catch(e) { logger.error('Error catálogo:', e); res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/catalogo/:id', ...adminOTecnico, async (req, res) => {
+app.delete('/api/catalogo/:id', verifyToken, requireModulo('recepcion'), async (req, res) => {
     try { await dbRun("DELETE FROM catalogo WHERE id=?", [req.params.id]); res.sendStatus(200); }
     catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -1026,7 +1124,46 @@ app.delete('/api/catalogo/:id', ...adminOTecnico, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 // 13. PRODUCTOS — MEJORA #13: búsqueda + alerta stock bajo
 // ══════════════════════════════════════════════════════════════════════════════
-app.get('/api/productos', ...todosLosRoles, async (req, res) => {
+
+// ── Categorías de productos (dropdown "Agregar Producto") ──
+// Nota: van ANTES de /api/productos/:id para que no las intercepte el :id
+app.get('/api/productos/categorias', verifyToken, requireModulo('ventas'), async (req, res) => {
+    try { res.json(await dbAll("SELECT id, nombre FROM producto_categorias ORDER BY nombre")); }
+    catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/productos/categorias', verifyToken, requireModulo('ventas'), async (req, res) => {
+    const { nombre } = req.body;
+    if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Falta nombre' });
+    try {
+        await dbRun("INSERT OR IGNORE INTO producto_categorias (nombre) VALUES (?)", [nombre.trim()]);
+        res.json({ success: true });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/productos/categorias/:id', verifyToken, requireModulo('ventas'), async (req, res) => {
+    const { nombre } = req.body;
+    if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Falta nombre' });
+    try {
+        const old = await dbGet("SELECT nombre FROM producto_categorias WHERE id = ?", [req.params.id]);
+        if (!old) return res.status(404).json({ error: 'Categoría no encontrada' });
+        const nuevo = nombre.trim();
+        if (old.nombre !== nuevo) {
+            const existe = await dbGet("SELECT id FROM producto_categorias WHERE nombre = ? AND id != ?", [nuevo, req.params.id]);
+            if (existe) return res.status(400).json({ error: 'Ya existe una categoría con ese nombre' });
+            await dbRun("UPDATE producto_categorias SET nombre = ? WHERE id = ?", [nuevo, req.params.id]);
+            await dbRun("UPDATE productos SET categoria = ? WHERE categoria = ?", [nuevo, old.nombre]);
+        }
+        res.json({ success: true });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/productos/categorias/:id', verifyToken, requireModulo('ventas'), async (req, res) => {
+    try { await dbRun("DELETE FROM producto_categorias WHERE id = ?", [req.params.id]); res.json({ success: true }); }
+    catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/productos', verifyToken, requireModulo('ventas'), async (req, res) => {
     try {
         const q = req.query.q ? `%${req.query.q}%` : null;
         const soloStockBajo = req.query.stock_bajo === '1';
@@ -1039,12 +1176,12 @@ app.get('/api/productos', ...todosLosRoles, async (req, res) => {
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/productos/:id', ...todosLosRoles, async (req, res) => {
+app.get('/api/productos/:id', verifyToken, requireModulo('ventas'), async (req, res) => {
     try { res.json(await dbGet("SELECT * FROM productos WHERE id = ?", [req.params.id]) || null); }
     catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/productos', ...soloAdmin, validar('producto'), async (req, res) => {
+app.post('/api/productos', verifyToken, requireModulo('ventas'), validar('producto'), async (req, res) => {
     const { codigo, nombre, descripcion, precio, stock, categoria, imagen_url } = req.body;
     try {
         const r = await dbRun("INSERT INTO productos (codigo, nombre, descripcion, precio, stock, categoria, imagen_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -1056,7 +1193,7 @@ app.post('/api/productos', ...soloAdmin, validar('producto'), async (req, res) =
     }
 });
 
-app.put('/api/productos/:id', ...soloAdmin, async (req, res) => {
+app.put('/api/productos/:id', verifyToken, requireModulo('ventas'), async (req, res) => {
     const { nombre, descripcion, precio, stock, categoria, imagen_url } = req.body;
     try {
         await dbRun("UPDATE productos SET nombre=?, descripcion=?, precio=?, stock=?, categoria=?, imagen_url=? WHERE id=?",
@@ -1065,12 +1202,12 @@ app.put('/api/productos/:id', ...soloAdmin, async (req, res) => {
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/productos/:id', ...soloAdmin, async (req, res) => {
+app.delete('/api/productos/:id', verifyToken, requireModulo('ventas'), async (req, res) => {
     try { await dbRun("UPDATE productos SET activo = 0 WHERE id = ?", [req.params.id]); res.json({ success: true }); }
     catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/productos/:id/stock', ...adminOVendedor, async (req, res) => {
+app.put('/api/productos/:id/stock', verifyToken, requireModulo('ventas'), async (req, res) => {
     const { cantidad } = req.body;
     try { await dbRun("UPDATE productos SET stock = stock + ? WHERE id = ?", [cantidad, req.params.id]); res.json({ success: true }); }
     catch(e) { res.status(500).json({ error: e.message }); }
@@ -1080,7 +1217,7 @@ app.put('/api/productos/:id/stock', ...adminOVendedor, async (req, res) => {
 // 14. VENTAS — MEJORA #1: transacción async/await sin race condition
 //             MEJORA #9: paginación en listado
 // ══════════════════════════════════════════════════════════════════════════════
-app.get('/api/ventas', ...adminOVendedor, async (req, res) => {
+app.get('/api/ventas', verifyToken, requireModulo('ventas','reportes'), async (req, res) => {
     try {
         const page   = Math.max(1, parseInt(req.query.page)  || 1);
         const limit  = Math.min(200, parseInt(req.query.limit) || 50);
@@ -1094,7 +1231,7 @@ app.get('/api/ventas', ...adminOVendedor, async (req, res) => {
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/ventas/:id', ...adminOVendedor, async (req, res) => {
+app.get('/api/ventas/:id', verifyToken, requireModulo('ventas','reportes'), async (req, res) => {
     try {
         const venta = await dbGet("SELECT * FROM ventas WHERE id = ?", [req.params.id]);
         if (!venta) return res.status(404).json({ error: 'Venta no encontrada' });
@@ -1104,7 +1241,7 @@ app.get('/api/ventas/:id', ...adminOVendedor, async (req, res) => {
 });
 
 // MEJORA #1: transacción segura con async/await — sin race condition en COMMIT/ROLLBACK
-app.post('/api/ventas', ...adminOVendedor, validar('venta'), async (req, res) => {
+app.post('/api/ventas', verifyToken, requireModulo('ventas'), validar('venta'), async (req, res) => {
     const { cliente, items, subtotal, descuento, total, metodo_pago, efectivo, cambio, usuario } = req.body;
     const fecha = new Date().toISOString();
     const folio = 'V' + Date.now();
@@ -1143,7 +1280,7 @@ app.post('/api/ventas', ...adminOVendedor, validar('venta'), async (req, res) =>
 // ══════════════════════════════════════════════════════════════════════════════
 // 15. ESTADÍSTICAS — MEJORA #12: dashboard ampliado
 // ══════════════════════════════════════════════════════════════════════════════
-app.get('/api/ventas/estadisticas/hoy', ...soloAdmin, async (req, res) => {
+app.get('/api/ventas/estadisticas/hoy', verifyToken, requireModulo('ventas','reportes'), async (req, res) => {
     try {
         const hoy = new Date().toISOString().split('T')[0];
         const row = await dbGet(`SELECT COUNT(*) as ventas_count, COALESCE(SUM(total), 0) as ventas_total, COALESCE(SUM((SELECT SUM(cantidad) FROM ventas_detalle WHERE venta_id = ventas.id)), 0) as productos_vendidos FROM ventas WHERE DATE(fecha) = ?`, [hoy]);
@@ -1151,7 +1288,7 @@ app.get('/api/ventas/estadisticas/hoy', ...soloAdmin, async (req, res) => {
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/ventas/estadisticas/mes', ...soloAdmin, async (req, res) => {
+app.get('/api/ventas/estadisticas/mes', verifyToken, requireModulo('ventas','reportes'), async (req, res) => {
     try {
         const mes = new Date().toISOString().slice(0, 7);
         const row = await dbGet(`SELECT COUNT(*) as ventas_count, COALESCE(SUM(total), 0) as ventas_total FROM ventas WHERE strftime('%Y-%m', fecha) = ?`, [mes]);
@@ -1160,7 +1297,7 @@ app.get('/api/ventas/estadisticas/mes', ...soloAdmin, async (req, res) => {
 });
 
 // MEJORA #12: endpoint de dashboard completo
-app.get('/api/estadisticas/dashboard', ...soloAdmin, async (req, res) => {
+app.get('/api/estadisticas/dashboard', verifyToken, requireModulo('reportes'), async (req, res) => {
     try {
         const hoy = new Date().toISOString().split('T')[0];
         const mes = new Date().toISOString().slice(0, 7);
@@ -1207,12 +1344,12 @@ app.post('/api/whatsapp/conectar', ...soloAdmin, async (req, res) => {
     res.json({ ok: true, msg: 'Abrí WhatsApp Web escaneando el QR en la ventana de Electron' });
 });
 
-app.post('/api/whatsapp/enviar', ...adminOTecnico, async (req, res) => {
+app.post('/api/whatsapp/enviar', verifyToken, requireModulo('chatbot'), async (req, res) => {
     // El envío se hace manualmente desde el BrowserView de WhatsApp Web
     res.json({ ok: true, msg: 'Usá WhatsApp Web abierto en la ventana de TECNITEC para enviar mensajes' });
 });
 
-app.get('/api/whatsapp/chat/:telefono', ...adminOTecnico, async (req, res) => {
+app.get('/api/whatsapp/chat/:telefono', verifyToken, requireModulo('chatbot'), async (req, res) => {
     try {
         const tel = req.params.telefono.replace(/\D/g, '');
         const nom = (req.query.nombre || '').trim().toLowerCase();
@@ -1247,7 +1384,7 @@ app.get('/api/whatsapp/chat/:telefono', ...adminOTecnico, async (req, res) => {
 });
 
 // Guardar mensajes scrapeados del webview
-app.post('/api/whatsapp/chat/scrape-save', ...adminOTecnico, async (req, res) => {
+app.post('/api/whatsapp/chat/scrape-save', verifyToken, requireModulo('chatbot'), async (req, res) => {
     try {
         const { telefono, nombre, mensajes } = req.body;
         if (!telefono || !mensajes || !Array.isArray(mensajes)) {
@@ -1310,15 +1447,15 @@ app.post('/api/chatbot/consultas/presupuesto', async (req, res) => {
 });
 
 // Frontend admin panel endpoints
-app.get('/api/chatbot/conversaciones', ...soloAdmin, async (req, res) => {
+app.get('/api/chatbot/conversaciones', verifyToken, requireModulo('chatbot'), async (req, res) => {
     try { res.json(await dbAll("SELECT * FROM conversaciones_chatbot ORDER BY fecha_ultimo DESC LIMIT 50")); }
     catch(e) { res.status(500).json({ error: e.message }); }
 });
-app.get('/api/chatbot/consultas/pendientes', ...soloAdmin, async (req, res) => {
+app.get('/api/chatbot/consultas/pendientes', verifyToken, requireModulo('chatbot'), async (req, res) => {
     try { const rows = await dbAll("SELECT * FROM consultas_presupuesto WHERE estado = 'pendiente' ORDER BY fecha"); res.json(rows || []); }
     catch(e) { res.json([]); }
 });
-app.post('/api/chatbot/responder-consulta', ...adminOTecnico, async (req, res) => {
+app.post('/api/chatbot/responder-consulta', verifyToken, requireModulo('chatbot','recepcion','taller'), async (req, res) => {
     const { consulta_id, tecnico, respuesta, presupuesto } = req.body;
     try {
         await dbRun(`UPDATE consultas_presupuesto SET estado='respondida', tecnico_asignado=?, fecha_respuesta=?, presupuesto_enviado=? WHERE id=?`,
@@ -1499,7 +1636,7 @@ async function generarRespuestaIA(mensajeUsuario, contextoAdicional) {
 }
 
 // Endpoint para generar respuesta IA (admin)
-app.post('/api/chatbot/ia-generar', ...adminOTecnico, async (req, res) => {
+app.post('/api/chatbot/ia-generar', verifyToken, requireModulo('chatbot','recepcion','taller'), async (req, res) => {
     try {
         const { mensaje, telefono, orden_id } = req.body;
         if (!mensaje) return res.status(400).json({ error: 'Mensaje requerido' });
@@ -1570,7 +1707,7 @@ app.get('/api/webview/ai-status', async (req, res) => {
 });
 
 // Endpoint para verificar estado de Ollama
-app.get('/api/ollama/status', async (req, res) => {
+app.get('/api/ollama/status', verifyToken, requireModulo('chatbot'), async (req, res) => {
     try {
         const r = await new Promise((resolve, reject) => {
             const req2 = http.get(OLLAMA_HOST + '/api/tags', (resp) => {
@@ -1600,7 +1737,7 @@ app.post('/api/ollama/reinstall', ...soloAdmin, async (req, res) => {
 });
 
 // Endpoint para probar la IA desde ajustes
-app.post('/api/chatbot/ia-test', ...adminOTecnico, async (req, res) => {
+app.post('/api/chatbot/ia-test', verifyToken, requireModulo('chatbot','recepcion','taller'), async (req, res) => {
     try {
         const { mensaje } = req.body;
         if (!mensaje) return res.status(400).json({ error: 'Mensaje requerido' });
@@ -1642,7 +1779,7 @@ function _iniciarAutoResponder() {
 }
 
 // Endpoint para ejecutar auto-respuesta manualmente
-app.post('/api/chatbot/auto-responder/run', ...adminOTecnico, async (req, res) => {
+app.post('/api/chatbot/auto-responder/run', verifyToken, requireModulo('chatbot'), async (req, res) => {
     await _procesarAutoRespuestas();
     res.json({ ok: true });
 });
@@ -1658,14 +1795,14 @@ setTimeout(verificarOllama, 3000);
 // ══════════════════════════════════════════════════════════════════════════════
 // 18. PLANTILLAS DE RESPUESTA RÁPIDA
 // ══════════════════════════════════════════════════════════════════════════════
-app.get('/api/plantillas', ...adminOTecnico, async (req, res) => {
+app.get('/api/plantillas', verifyToken, requireModulo('chatbot'), async (req, res) => {
     try {
         const rows = await dbAll("SELECT * FROM plantillas_respuesta ORDER BY orden ASC, nombre ASC");
         res.json(rows);
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/plantillas', ...soloAdmin, async (req, res) => {
+app.post('/api/plantillas', verifyToken, requireModulo('chatbot'), async (req, res) => {
     try {
         const { nombre, contenido } = req.body;
         if (!nombre || !contenido) return res.status(400).json({ error: 'Nombre y contenido requeridos' });
@@ -1674,7 +1811,7 @@ app.post('/api/plantillas', ...soloAdmin, async (req, res) => {
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/plantillas/:id', ...soloAdmin, async (req, res) => {
+app.put('/api/plantillas/:id', verifyToken, requireModulo('chatbot'), async (req, res) => {
     try {
         const { nombre, contenido, orden } = req.body;
         if (!nombre || !contenido) return res.status(400).json({ error: 'Nombre y contenido requeridos' });
@@ -1683,7 +1820,7 @@ app.put('/api/plantillas/:id', ...soloAdmin, async (req, res) => {
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/plantillas/:id', ...soloAdmin, async (req, res) => {
+app.delete('/api/plantillas/:id', verifyToken, requireModulo('chatbot'), async (req, res) => {
     try {
         await dbRun("DELETE FROM plantillas_respuesta WHERE id=?", [req.params.id]);
         res.json({ ok: true });
@@ -1746,7 +1883,7 @@ app.get('/api/red/ping', (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 // Estado actual de caja (¿hay una sesión abierta hoy?)
-app.get('/api/caja/estado', ...todosLosRoles, async (req, res) => {
+app.get('/api/caja/estado', verifyToken, requireModulo('ventas','reportes'), async (req, res) => {
     try {
         const hoy = new Date().toISOString().split('T')[0];
         const sesion = await dbGet(
@@ -1757,7 +1894,7 @@ app.get('/api/caja/estado', ...todosLosRoles, async (req, res) => {
 });
 
 // Abrir caja
-app.post('/api/caja/abrir', ...todosLosRoles, async (req, res) => {
+app.post('/api/caja/abrir', verifyToken, requireModulo('ventas','reportes'), async (req, res) => {
     try {
         const { monto_apertura = 0, notas = '' } = req.body;
         const hoy = new Date().toISOString().split('T')[0];
@@ -1775,7 +1912,7 @@ app.post('/api/caja/abrir', ...todosLosRoles, async (req, res) => {
 });
 
 // Cerrar caja — calcula totales desde ventas del día
-app.post('/api/caja/cerrar', ...todosLosRoles, async (req, res) => {
+app.post('/api/caja/cerrar', verifyToken, requireModulo('ventas','reportes'), async (req, res) => {
     try {
         const { monto_cierre, notas = '' } = req.body;
         if (monto_cierre === undefined) return res.status(400).json({ error: 'monto_cierre requerido' });
@@ -1815,7 +1952,7 @@ app.post('/api/caja/cerrar', ...todosLosRoles, async (req, res) => {
 });
 
 // Historial de cajas
-app.get('/api/caja/historial', ...soloAdmin, async (req, res) => {
+app.get('/api/caja/historial', verifyToken, requireModulo('ventas','reportes'), async (req, res) => {
     try {
         const rows = await dbAll("SELECT * FROM caja_sesiones ORDER BY id DESC LIMIT 30");
         res.json(rows);
@@ -1823,7 +1960,7 @@ app.get('/api/caja/historial', ...soloAdmin, async (req, res) => {
 });
 
 // Resumen caja actual (ventas en tiempo real durante el día)
-app.get('/api/caja/resumen-hoy', ...todosLosRoles, async (req, res) => {
+app.get('/api/caja/resumen-hoy', verifyToken, requireModulo('ventas','reportes'), async (req, res) => {
     try {
         const hoy = new Date().toISOString().split('T')[0];
         const [sesion, ventas, cantOrdenes] = await Promise.all([
@@ -2009,7 +2146,7 @@ app.post('/api/pagos/test-conexion', ...soloAdmin, async (req, res) => {
     } catch(e) { res.json({ ok: false, msg: 'Error de red: ' + e.message }); }
 });
 
-app.post('/api/pagos/crear-preferencia', ...adminOVendedor, async (req, res) => {
+app.post('/api/pagos/crear-preferencia', verifyToken, requireModulo('ventas'), async (req, res) => {
     try {
         const { monto, descripcion, ventaId, metodo } = req.body;
         if (!monto || monto <= 0) return res.status(400).json({ error: 'Monto inválido' });
@@ -2033,7 +2170,7 @@ app.post('/api/pagos/crear-preferencia', ...adminOVendedor, async (req, res) => 
     } catch(e) { logger.error('[Pagos]', e.message); res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/pagos/:id/estado', ...adminOVendedor, async (req, res) => {
+app.get('/api/pagos/:id/estado', verifyToken, requireModulo('ventas'), async (req, res) => {
     try {
         const p = await dbGet("SELECT * FROM pagos WHERE id=?", [req.params.id]);
         if (!p) return res.status(404).json({ error: 'No encontrado' });
@@ -2051,7 +2188,7 @@ app.get('/api/pagos/:id/estado', ...adminOVendedor, async (req, res) => {
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/pagos/:id/confirmar-manual', ...adminOVendedor, async (req, res) => {
+app.post('/api/pagos/:id/confirmar-manual', verifyToken, requireModulo('ventas'), async (req, res) => {
     try { await dbRun("UPDATE pagos SET estado='aprobado',proveedor='manual',confirmado_en=datetime('now') WHERE id=?", [req.params.id]); res.json({ ok: true }); }
     catch(e) { res.status(500).json({ error: e.message }); }
 });
