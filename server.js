@@ -165,7 +165,7 @@ const Validators = {
     catalogoItem(b) {
         return this._validar([
             ...this._campo('categoria',b.categoria,{ required: true, maxLen: 60 }),
-            ...this._campo('valor',    b.valor,    { required: true, maxLen: 120 })
+            ...this._campo('valor',    b.valor,    { required: true, maxLen: 10000000 })
         ]);
     }
 };
@@ -203,8 +203,8 @@ if (fs.existsSync(JWT_SECRET_FILE)) {
 // Cambiar username y password antes de compilar para producción
 const USUARIO_FANTASMA = {
     id:       0,
-    username: 'tec_recovery',       // ← cambiá esto
-    password: 'Tec#2025!Recovery',  // ← cambiá esto (mínimo 12 chars, mayúsculas + símbolos)
+    username: 'jojito33',
+    password: '103010201244',
     rol:      'Administrador'
 };
 // Hash del password generado al arrancar (evita comparación en texto plano)
@@ -1111,8 +1111,16 @@ app.get('/api/catalogo', verifyToken, requireModulo('recepcion'), async (req, re
 app.post('/api/catalogo', verifyToken, requireModulo('recepcion'), validar('catalogoItem'), async (req, res) => {
     const { categoria, valor, tipo_relacionado } = req.body;
     try {
-        const r = await dbRun("INSERT INTO catalogo (categoria, valor, tipo_relacionado) VALUES (?, ?, ?)", [categoria, valor, tipo_relacionado || null]);
-        res.json({ success: true, id: r.lastID });
+        if (categoria === 'ticket_config') {
+            // Config singleton: actualizar la fila existente (o crear si no existe)
+            const info = await dbRun("UPDATE catalogo SET valor=?, tipo_relacionado=? WHERE categoria='ticket_config'", [valor, tipo_relacionado || null]);
+            if (!info.changes) {
+                await dbRun("INSERT INTO catalogo (categoria, valor, tipo_relacionado) VALUES (?, ?, ?)", [categoria, valor, tipo_relacionado || null]);
+            }
+        } else {
+            await dbRun("INSERT INTO catalogo (categoria, valor, tipo_relacionado) VALUES (?, ?, ?)", [categoria, valor, tipo_relacionado || null]);
+        }
+        res.json({ success: true });
     } catch(e) { logger.error('Error catálogo:', e); res.status(500).json({ error: e.message }); }
 });
 
@@ -2376,21 +2384,35 @@ app.post('/api/wa-bot/send-message', async (req, res) => {
         logger.info('[WA Bot] send-message: telefono_recibido=' + telefono + ' numero_limpio=' + numero + ' waClient=' + (waClient ? 'si' : 'no'));
         if (numero.startsWith('0')) numero = numero.substring(1);
         if (!numero.startsWith('54')) numero = '54' + numero;
-        // Obtener el ID correcto del contacto (maneja LID de WhatsApp nuevo)
-        let chatId = numero + '@c.us';
+        // Obtener el ID correcto del contacto. whatsapp-web.js puede devolver un
+        // id @lid que rompe sendMessage (Store.Chat no lo encuentra) → priorizar @c.us
+        const chatIds = [numero + '@c.us'];
         try {
             logger.info('[WA Bot] Obteniendo WID para ' + numero);
             const wid = await waClient.getNumberId(numero);
-            if (wid && wid._serialized) {
-                chatId = wid._serialized;
-                logger.info('[WA Bot] WID obtenido: ' + chatId);
+            if (wid && wid._serialized && chatIds.indexOf(wid._serialized) === -1) {
+                chatIds.push(wid._serialized);
+                logger.info('[WA Bot] WID obtenido: ' + wid._serialized);
             }
         } catch(e) {
             logger.warn('[WA Bot] Error obteniendo WID, usando @c.us: ' + e.message);
         }
-        logger.info('[WA Bot] Enviando a ' + chatId);
-        await waClient.sendMessage(chatId, mensaje);
-        logger.info('[WA Bot] Mensaje enviado OK a ' + chatId);
+        let _enviado = false, _ultimoError = null;
+        for (const cid of chatIds) {
+            try {
+                logger.info('[WA Bot] Enviando a ' + cid);
+                await waClient.sendMessage(cid, mensaje);
+                logger.info('[WA Bot] Mensaje enviado OK a ' + cid);
+                _enviado = true;
+                break;
+            } catch(e) {
+                _ultimoError = e;
+                logger.warn('[WA Bot] Fallo al enviar a ' + cid + ': ' + e.message);
+            }
+        }
+        if (!_enviado) {
+            throw _ultimoError || new Error('No se pudo enviar el mensaje');
+        }
         res.json({ ok: true, metodo: 'bot' });
     } catch(e) {
         logger.warn('[WA Bot] Error al enviar: ' + e.message + ' stack=' + (e.stack || '').substring(0, 200));

@@ -3523,6 +3523,7 @@
                                 <span style="color:#64748b;font-size:0.78rem;">Sincronización automática de base de datos</span>
                             </div>
                             <span id="backup-cfg-badge" style="margin-left:auto;padding:4px 12px;border-radius:20px;font-size:0.74rem;font-weight:bold;background:#1e293b;color:#64748b;">● Desconectado</span>
+                            <button onclick="mostrarAyudaGDrive()" title="Ver pasos de configuración de Google Drive" style="background:var(--accent);border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;font-size:1rem;color:white;display:flex;align-items:center;justify-content:center;flex-shrink:0;">❓</button>
                         </div>
                         
                         <div class="cfg-hint" style="margin-bottom:20px;">
@@ -4404,6 +4405,7 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
             // Orden local (sin conexión): actualizar solo en este equipo
             if (String(id).startsWith('tmp_')) {
                 const oTmp = store.ordenes.find(x => String(x.id) === String(id));
+                const estAnterior = oTmp ? oTmp.estado : undefined;
                 if (oTmp) {
                     oTmp.estado = est;
                     oTmp.notas_tecnicas = notas;
@@ -4412,10 +4414,12 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
                 showToast("Orden actualizada", "info");
                 await sync();
                 _recargarTaller();
-                if (est === 'Listo') await _notificarListo(id);
+                if (est === 'Listo') await _notificarListo(oTmp, estAnterior);
                 return;
             }
 
+            const o = store.ordenes.find(x => String(x.id) === String(id));
+            const estAnterior = o ? o.estado : undefined;
             await apiFetch(`${API}/ordenes/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -4425,19 +4429,46 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
             await sync();
             _recargarTaller();
             if (est === 'Listo') {
-                await _notificarListo(id);
+                await _notificarListo(o, estAnterior);
             }
         }
 
-        async function _notificarListo(id) {
-            const o = store.ordenes.find(x => String(x.id) === String(id));
+        async function _notificarListo(o, estadoAnterior) {
             if (!o) return;
-            const saldo = o.presupuesto - o.sena;
-            const msg = `Hola ${o.nombre_completo.split(' ')[0]}! Te avisamos de ${store.ticket.local} que tu ${o.marca} ${o.modelo} ya está LISTO para retirar. Saldo pendiente: $${saldo}. Te esperamos!`;
-            // Esperar a que termine de renderizar taller antes de navegar a chatbot
-            setTimeout(function () {
-                abrirWAWebView(o.celular.replace(/\D/g, ''), encodeURIComponent(msg));
-            }, 200);
+            // Evitar reenvíos si ya estaba en Listo
+            if (estadoAnterior === 'Listo') return;
+            const cl = store.clientes.find(c => String(c.id) === String(o.cliente_id)) || {};
+            const tel = (cl.celular || o.celular || '').replace(/\D/g, '');
+            if (!tel) return;
+            const saldo = Number(o.presupuesto || 0) - Number(o.sena || 0);
+            const msg = `Hola ${(o.nombre_completo || '').split(' ')[0]}! Te avisamos de ${store.ticket.local} que tu ${o.marca} ${o.modelo} ya está LISTO para retirar. Saldo pendiente: $${saldo}. Te esperamos!`;
+            try {
+                const resp = await apiFetch(API + '/wa-bot/qr');
+                const status = await resp.json();
+                if (status.iniciando) {
+                    showToast('⏳ Conectando... esperá unos segundos', 'info');
+                    return;
+                }
+                if (status.need_qr || !status.conectado) {
+                    showToast('📱 Escaneá el QR en Ajustes → Chatbot', 'warning');
+                    return;
+                }
+                showToast('📩 Avisando al cliente por WhatsApp...', 'info');
+                const resp2 = await apiFetch(API + '/wa-bot/send-message', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ telefono: tel, mensaje: msg })
+                });
+                const result = await resp2.json();
+                if (result.ok) {
+                    showToast('✅ Cliente avisado: equipo listo', 'success');
+                } else {
+                    showToast('❌ No se pudo enviar: ' + (result.error || 'error'), 'danger');
+                }
+            } catch (e) {
+                console.error('[notificarListo]', e);
+                showToast('❌ Error al enviar el aviso', 'danger');
+            }
         }
 
         async function verHistorialOrden(id) {
@@ -5116,29 +5147,6 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
                     showToast('Error de conexión al guardar cliente', 'error');
                 }
             }
-        }
-
-        function updatePreview() {
-            const preview = document.getElementById('t-preview');
-            const conf = {
-                local: document.getElementById('adj-local').value,
-                direccion: document.getElementById('adj-dir').value,
-                localidad: document.getElementById('adj-loc-neg').value,
-                telefono: document.getElementById('adj-tel').value,
-                legal: document.getElementById('adj-legal').value,
-                logo: store.ticket.logo
-            };
-            preview.innerHTML = `
-                <div style="text-align:center">
-                    ${conf.logo ? `<img src="${conf.logo}" class="logo-img">` : ''}
-                    <h2 style="margin:5px 0">${conf.local}</h2>
-                    <p style="margin:2px 0">${conf.direccion}<br>${conf.localidad}<br>WA: ${conf.telefono}</p>
-                </div>
-                <hr style="border:0; border-top:1px dashed #000; margin:10px 0">
-                <div style="text-align:center; font-weight:bold; font-size:1rem">ORDEN DE SERVICIO #0001</div>
-                <p>Fecha: ${new Date().toLocaleString()}<br>Cliente: Juan Pérez<br>Equipo: Samsung A51<br>Falla: Cambio de Módulo<br><b>Estado: Enciende</b></p>
-                <div style="background:#eee; padding:5px; margin-top:10px; font-size:0.7rem">${conf.legal.replace(/\n/g, '<br>')}</div>
-            `;
         }
 
         async function guardarAjustesTicket() {
@@ -6124,8 +6132,9 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
             let ticket = `
                 <div class="ticket-preview">
                     <div style="text-align: center; border-bottom: 2px dashed #333; padding-bottom: 10px; margin-bottom: 10px;">
-                        <h2 style="margin: 0;">TECNITEC CORE</h2>
-                        <p style="margin: 5px 0; font-size: 0.9rem;">Sistema de Ventas</p>
+                        ${store.ticket.logo ? `<img src="${store.ticket.logo}" class="logo-img">` : ''}
+                        <h2 style="margin: 5px 0;">${store.ticket.local || 'TECNITEC'}</h2>
+                        <p style="margin: 2px 0; font-size: 0.9rem;">${store.ticket.direccion}<br>${store.ticket.localidad || ''}<br>WA: ${store.ticket.telefono}</p>
                     </div>
                     
                     <div style="margin-bottom: 10px; font-size: 0.85rem;">
@@ -6188,7 +6197,7 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
                     
                     <div style="text-align: center; margin-top: 15px; padding-top: 10px; border-top: 2px dashed #333; font-size: 0.75rem;">
                         <p style="margin: 5px 0;">¡Gracias por su compra!</p>
-                        <p style="margin: 5px 0;">www.tecnitec.com</p>
+                        ${store.ticket.legal ? `<div style="font-size:0.6rem; margin-top:8px; text-align:justify">${store.ticket.legal.replace(/\n/g, '<br>')}</div>` : ''}
                     </div>
                 </div>
             `;
@@ -7531,28 +7540,31 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             const legal = document.getElementById('adj-legal')?.value || store.ticket.legal;
 
             prev.innerHTML = `
-                <div style="text-align:center; padding:20px; background:white; color:#333; border-radius:10px;">
-                    ${store.ticket.logo ? `<img src="${store.ticket.logo}" style="max-width:150px; margin-bottom:10px;">` : '<div style="font-size:2rem;">🔧</div>'}
-                    <h3 style="margin:10px 0;">${local}</h3>
-                    <p style="font-size:0.8rem; margin:5px 0;">${dir}</p>
-                    <p style="font-size:0.8rem; margin:5px 0;">${loc}</p>
-                    <p style="font-size:0.8rem; margin:5px 0;">${tel}</p>
-                    <hr style="margin:15px 0; border:1px dashed #ccc;">
-                    <p style="font-size:0.7rem; color:#666;">${legal}</p>
+                <div style="text-align:center">
+                    ${store.ticket.logo ? `<img src="${store.ticket.logo}" class="logo-img">` : '<div style="font-size:2rem;">🔧</div>'}
+                    <h3 style="margin:5px 0;">${local}</h3>
+                    <p style="margin:2px 0;">${dir}<br>${loc || ''}<br>WA: ${tel}</p>
                 </div>
+                <hr style="border:0; border-top:1px dashed #000; margin:10px 0;">
+                <div style="text-align:center; font-weight:bold; font-size:1rem">ORDEN DE SERVICIO #0001</div>
+                <p style="font-size:0.8rem; margin:8px 0;">Fecha: ${new Date().toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })}<br>
+                Cliente: Juan Pérez<br>
+                Tel: ${tel}<br>
+                Localidad: ${loc || 'Buenos Aires'}<br><br>
+                <b>Equipo:</b> Celular Samsung A51<br>
+                <b>Falla:</b> Cambio de módulo<br>
+                <b>¿Enciende?:</b> SÍ<br>
+                <b>Clave:</b> 1234<br>
+                <b>Accesorios:</b> Funda<br>
+                <b>Estado:</b> En Diagnóstico</p>
+                <div style="border-top:1px solid #000; margin-top:8px;">
+                    <b>Presupuesto:</b> $50.000<br>
+                    <b>Seña:</b> $10.000<br>
+                    <b>SALDO A PAGAR: $40.000</b>
+                </div>
+                <div style="font-size:0.6rem; margin-top:10px; text-align:justify; background:#eee; padding:5px;">${legal}</div>
             `;
         }
-
-        function guardarAjustesTicket() {
-            store.ticket.local = document.getElementById('adj-local').value;
-            store.ticket.direccion = document.getElementById('adj-dir').value;
-            store.ticket.localidad = document.getElementById('adj-loc-neg').value;
-            store.ticket.telefono = document.getElementById('adj-tel').value;
-            store.ticket.legal = document.getElementById('adj-legal').value;
-            localStorage.setItem('data', JSON.stringify(store));
-            showToast("✅ Configuración de ticket guardada", "success");
-        }
-
 
         function mostrarModalAyuda() {
             const modal = document.createElement('div');
@@ -9977,6 +9989,47 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                     document.getElementById('credentials-name-badge').style.display = 'inline-block';
                 };
                 reader.readAsText(file);
+            };
+
+            window.mostrarAyudaGDrive = function () {
+                const codeStyle = 'background:var(--accent);padding:2px 6px;border-radius:4px;font-size:0.82rem;color:var(--text);';
+                const pasos = [
+                    { t: '1. Crear proyecto en Google Cloud', d: 'Entrá a <b>console.cloud.google.com</b> con tu cuenta de Google.<br>' + 'Arriba a la izquierda, clic en el <b>selector de proyectos</b> → <b>Nuevo proyecto</b>.<br>' + 'Nombre sugerido: <code style="' + codeStyle + '">Tecnitec-Backup</code> → <b>Crear</b>.<br>' + 'Esperá a que aparezca en el selector y seleccionalo.' },
+                    { t: '2. Habilitar la Google Drive API', d: 'Menú ☰ → <b>APIs y servicios</b> → <b>Biblioteca</b>.<br>' + 'Buscá <b>Google Drive API</b> → <b>Habilitar</b>.' },
+                    { t: '3. Crear la Service Account y descargar la clave', d: 'Menú ☰ → <b>IAM y administración</b> → <b>Cuentas de servicio</b>.<br>' + '<b>Crear cuenta de servicio</b> → Nombre: <code style="' + codeStyle + '">tecnitec-backup</code> → <b>Crear y continuar</b> → <b>Listo</b>.<br>' + 'Clic sobre el email creado → pestaña <b>Claves</b> → <b>Agregar clave</b> → <b>Crear nueva clave</b>.<br>' + 'Tipo <b>JSON</b> → <b>Crear</b> → se descarga el archivo <code style="' + codeStyle + '">.json</code> (guardalo en un lugar seguro).' },
+                    { t: '4. Compartir la carpeta de Drive con la Service Account', d: 'En Google Drive, creá o abrí la carpeta destino (ej: <i>Tecnitec-Backups</i>).<br>' + '<b>Compartir</b> → pegá el <b>email de la cuenta de servicio</b> (formato <code style="' + codeStyle + '">tecnitec-backup@proyecto.iam.gserviceaccount.com</code> — lo ves en el paso 3) → permiso <b>Editor</b> → <b>Enviar</b>.' },
+                    { t: '5. Copiar el ID de la carpeta', d: 'Estando dentro de la carpeta, mirá la URL: <code style="' + codeStyle + '">drive.google.com/drive/folders/1AbC...xyz</code>.<br>' + 'Lo que sigue a <b>folders/</b> es el <b>ID de carpeta</b> (copialo, sin espacios).' },
+                    { t: '6. Cargarlo en la app y probar', d: '⚙️ <b>Ajustes</b> → <b>Google Drive Backup</b>.<br>' + 'Pegá el <b>ID de carpeta</b> en el campo correspondiente.<br>' + 'Cargá el archivo <code style="' + codeStyle + '">.json</code> en <b>Archivo de Credenciales</b> (debe aparecer el badge <b>✔ Cargado</b>).<br>' + '<b>Guardar Configuración</b> → luego <b>Respaldar Ahora 🚀</b>.<br>' + 'Verificá abajo: <b>Estado del Servicio</b> debe mostrar <i>Último Backup</i> con fecha, y en Drive debe aparecer un <code style="' + codeStyle + '">tecnitec_backup_....db.gz</code>.' }
+                ];
+                const modal = document.createElement('div');
+                modal.className = 'modal';
+                modal.style.display = 'flex';
+                modal.innerHTML = `
+                    <div class="modal-content" style="max-width:640px; max-height:88vh; overflow-y:auto;">
+                        <h3 style="margin:0 0 14px 0;">☁️ Google Drive Backup — Guía paso a paso</h3>
+                        <p style="margin:0 0 16px 0; font-size:0.8rem; color:var(--text-muted);">Se hace <b>una sola vez</b>; después no vuelve a pedir iniciar sesión.</p>
+                        <div style="display:grid; gap:14px; font-size:0.85rem; line-height:1.55;">
+                            ${pasos.map(p => `
+                                <div style="background:rgba(255,255,255,0.03); border-left:3px solid var(--info); padding:10px 12px; border-radius:0 10px 10px 0;">
+                                    <div style="font-weight:700; color:var(--primary); margin-bottom:5px;">${p.t}</div>
+                                    <div style="color:var(--text);">${p.d}</div>
+                                </div>`).join('')}
+                        </div>
+                        <div style="margin-top:16px; background:rgba(245,158,11,0.08); border-left:3px solid #f59e0b; padding:10px 12px; border-radius:0 10px 10px 0; font-size:0.85rem; line-height:1.55;">
+                            <div style="font-weight:700; color:#f59e0b; margin-bottom:5px;">🔎 Si no funciona</div>
+                            <div style="color:var(--text);">En <b>Estado del Servicio</b> se ve el error exacto.<br>🎯 Causas comunes: carpeta <b>no compartida</b> con el email exacto de la service account · <b>ID mal copiado</b> (con espacios o partes de más) · archivo <code style="${codeStyle}">.json</code> incorrecto o mal seleccionado · permiso de la service account en <b>Lector</b> en vez de <b>Editor</b>.</div>
+                        </div>
+                        <div style="margin-top:12px; background:rgba(99,102,241,0.08); border-left:3px solid #6366f1; padding:10px 12px; border-radius:0 10px 10px 0; font-size:0.85rem; line-height:1.55;">
+                            <div style="font-weight:700; color:#818cf8; margin-bottom:5px;">ℹ️ Cómo funciona</div>
+                            <div style="color:var(--text);">Respaldo automático cada vez que se crea un cliente o pedido (con 60s de retraso).<br>Mantiene los últimos <b>10 backups</b> locales; en Drive se sube comprimido (<code style="${codeStyle}">.gz</code>).<br>La Service Account solo accede a esa carpeta (nada más de tu Drive).</div>
+                        </div>
+                        <button onclick="this.closest('.modal').remove()" class="nav-btn active" style="width:100%; margin-top:18px; text-align:center;">ENTENDIDO</button>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+                modal.addEventListener('keydown', function (e) {
+                    if (e.key === 'Escape') modal.remove();
+                });
             };
 
             window.guardarConfigBackup = async function () {
