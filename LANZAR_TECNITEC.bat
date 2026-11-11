@@ -29,20 +29,7 @@ if not exist "node_modules\" (
     )
 )
 
-:: 4. Reconstruir modulo nativo para Electron
-echo [SISTEMA] Reconstruyendo modulo nativo para Electron...
-call npm run rebuild
-if errorlevel 1 (
-    echo [SISTEMA] Fallo electron-rebuild, intentando npm rebuild...
-    call npm rebuild better-sqlite3
-)
-if errorlevel 1 (
-    echo [ERROR] No se pudo reconstruir better-sqlite3.
-    pause
-    exit /b
-)
-
-:: 5. Verificar binario de Electron
+:: 4. Verificar binario de Electron
 if not exist "node_modules\electron\dist\electron.exe" (
     echo [SISTEMA] Instalando binario de Electron...
     node install-electron.js
@@ -57,7 +44,7 @@ if not exist "node_modules\electron\dist\electron.exe" (
 echo [SISTEMA] Iniciando TECNITEC CORE...
 echo ------------------------------------------------------
 
-node_modules\electron\dist\electron.exe --no-sandbox --disable-disk-cache .
+node_modules\electron\dist\electron.exe --no-sandbox .
 
 echo.
 echo [SISTEMA] Aplicacion cerrada.

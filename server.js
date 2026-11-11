@@ -27,6 +27,8 @@ const backupService = require('./backup.service');
 const DATA_DIR = process.env.TECNITEC_DATA_DIR || __dirname;
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
+const _startTime = Date.now();
+
 // ══════════════════════════════════════════════════════════════════════════════
 // 1. LOGGING PROFESIONAL (Winston)
 // ══════════════════════════════════════════════════════════════════════════════
@@ -167,6 +169,40 @@ const Validators = {
             ...this._campo('categoria',b.categoria,{ required: true, maxLen: 60 }),
             ...this._campo('valor',    b.valor,    { required: true, maxLen: 10000000 })
         ]);
+    },
+    presupuesto(b) {
+        const errs = [
+            ...this._campo('cliente_id',   b.cliente_id,   { required: true, esNumero: true, min: 1, entero: true }),
+            ...this._campo('tipo_equipo',  b.tipo_equipo,  { required: true, maxLen: 80 }),
+            ...this._campo('marca',        b.marca,        { maxLen: 60 }),
+            ...this._campo('modelo',       b.modelo,       { maxLen: 80 }),
+            ...this._campo('falla',        b.falla,        { required: true, minLen: 3, maxLen: 500 }),
+            ...this._campo('fecha_validez',b.fecha_validez,{ maxLen: 20 }),
+            ...this._campo('descuento',    b.descuento,    { esNumero: true, min: 0, max: 9_999_999 }),
+            ...this._campo('sena',         b.sena,         { esNumero: true, min: 0, max: 9_999_999 }),
+            ...this._campo('notas',        b.notas,        { maxLen: 2000 }),
+            ...this._campo('terminos',     b.terminos,     { maxLen: 5000 })
+        ];
+
+        if (!Array.isArray(b.items) || b.items.length === 0) {
+            errs.push('items: debe contener al menos un ítem');
+        } else if (b.items.length > 100) {
+            errs.push('items: máximo 100 ítems');
+        } else {
+            b.items.forEach((item, i) => {
+                const p = `items[${i}]`;
+                errs.push(
+                    ...this._campo(`${p}.descripcion`,     item.descripcion,     { required: true, minLen: 1, maxLen: 300 }),
+                    ...this._campo(`${p}.cantidad`,        item.cantidad,        { required: true, esNumero: true, min: 0.01, max: 9999 }),
+                    ...this._campo(`${p}.precio_unitario`, item.precio_unitario, { required: true, esNumero: true, min: 0, max: 9_999_999 }),
+                    ...this._campo(`${p}.descuento`,       item.descuento,       { esNumero: true, min: 0, max: 9_999_999 })
+                );
+                if (item.tipo && !['servicio', 'repuesto', 'otro'].includes(item.tipo)) {
+                    errs.push(`${p}.tipo: inválido`);
+                }
+            });
+        }
+        return this._validar(errs);
     }
 };
 
@@ -265,7 +301,30 @@ const CAMPOS_ORDEN = [
 ];
 
 const app = express();
+
+// ── Middleware de Manejo de Errores Centralizado ──────────────────────────────────
+// Esta función estandariza la respuesta de error y evita filtrar datos internos
+function handleApiError(err, req, res, next) {
+    const statusCode = err.statusCode || 500;
+    const isOperational = err.isOperational || false;
+
+    // Loguear el error real para el desarrollador
+    logger.error(`[API ERROR] ${req.method} ${req.path} - ${err.message}`, {
+        stack: err.stack,
+        ip: req.ip,
+        usuario: req.user?.username || 'anonimo'
+    });
+
+    // Respuesta segura para el usuario
+    res.status(statusCode).json({
+        success: false,
+        error: isOperational ? err.message : 'Ocurrió un error interno en el servidor. Por favor, intenta más tarde.',
+        code: err.code || 'INTERNAL_ERROR'
+    });
+}
+
 app.use(cors({
+
     origin: function(origin, callback) {
         if (!origin) return callback(null, true);
         const allowed = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(:\d+)?$/.test(origin);
@@ -295,6 +354,9 @@ app.use((req, res, next) => {
     next();
 });
 
+// Registrar el manejador de errores al final de todos los middlewares y rutas
+app.use(handleApiError);
+
 let migracionLista = false;
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -306,7 +368,12 @@ const db = new Database(DB_PATH);
 
 // WAL mode: mejor rendimiento concurrente
 db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');
 db.pragma('foreign_keys = ON');
+db.pragma('busy_timeout = 5000');
+db.pragma('cache_size = -16000');    // ~16 MB
+db.pragma('temp_store = MEMORY');
+db.pragma('mmap_size = 67108864');   // 64 MB
 
 // Inicializar servicio de backup
 const GDriveConfig = {
@@ -332,12 +399,22 @@ backupService.init(GDriveConfig);
 
 // Nota: usar solo dbGet/dbAll/dbRun (promesas) para todas las consultas.
 
+// ── Cache de sentencias preparadas para optimizar rendimiento ──────────────────────
+const stmtCache = new Map();
+
+function getStatement(sql) {
+    if (stmtCache.has(sql)) return stmtCache.get(sql);
+    const stmt = db.prepare(sql);
+    stmtCache.set(sql, stmt);
+    return stmt;
+}
+
 // Wrappers con interfaz de promesas (mantiene compatibilidad con código existente)
 // better-sqlite3 es síncrono, pero las promesas permiten mantener el flujo async/await
 function dbRun(sql, params) {
     return new Promise((resolve, reject) => {
         try {
-            const stmt = db.prepare(sql);
+            const stmt = getStatement(sql);
             const result = stmt.run(...(params || []));
             resolve({ lastID: result.lastInsertRowid, changes: result.changes });
         } catch (err) {
@@ -348,7 +425,7 @@ function dbRun(sql, params) {
 function dbGet(sql, params) {
     return new Promise((resolve, reject) => {
         try {
-            const stmt = db.prepare(sql);
+            const stmt = getStatement(sql);
             const row = stmt.get(...(params || []));
             resolve(row);
         } catch (err) {
@@ -359,7 +436,7 @@ function dbGet(sql, params) {
 function dbAll(sql, params) {
     return new Promise((resolve, reject) => {
         try {
-            const stmt = db.prepare(sql);
+            const stmt = getStatement(sql);
             const rows = stmt.all(...(params || []));
             resolve(rows || []);
         } catch (err) {
@@ -691,6 +768,57 @@ const MIGRACIONES = [
             }
             logger.info('[v20] Columna modulos agregada a usuarios');
         }
+    },
+    {
+        version: 21, nombre: 'Módulo de presupuestos — cotizaciones y conversión a orden',
+        async up() {
+            await dbRun(`CREATE TABLE IF NOT EXISTS presupuestos (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                numero          TEXT UNIQUE,
+                cliente_id      INTEGER NOT NULL,
+                orden_id        INTEGER,
+                fecha_creacion  TEXT NOT NULL,
+                fecha_validez   TEXT,
+                estado          TEXT NOT NULL DEFAULT 'borrador',
+                tipo_equipo     TEXT,
+                marca           TEXT,
+                modelo          TEXT,
+                falla           TEXT,
+                subtotal        REAL NOT NULL DEFAULT 0,
+                descuento       REAL NOT NULL DEFAULT 0,
+                total           REAL NOT NULL DEFAULT 0,
+                sena            REAL NOT NULL DEFAULT 0,
+                saldo           REAL NOT NULL DEFAULT 0,
+                notas           TEXT,
+                terminos        TEXT,
+                motivo_rechazo  TEXT,
+                usuario_creador TEXT,
+                enviado_en      TEXT,
+                aprobado_en     TEXT,
+                created_at      TEXT DEFAULT (datetime('now')),
+                updated_at      TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY(cliente_id) REFERENCES clientes(id),
+                FOREIGN KEY(orden_id)   REFERENCES ordenes(id) ON DELETE SET NULL
+            )`);
+            await dbRun(`CREATE TABLE IF NOT EXISTS presupuesto_items (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                presupuesto_id  INTEGER NOT NULL,
+                tipo            TEXT NOT NULL DEFAULT 'servicio',
+                referencia_id   INTEGER,
+                descripcion     TEXT NOT NULL,
+                cantidad        REAL NOT NULL DEFAULT 1,
+                precio_unitario REAL NOT NULL DEFAULT 0,
+                descuento       REAL NOT NULL DEFAULT 0,
+                subtotal        REAL NOT NULL DEFAULT 0,
+                orden           INTEGER DEFAULT 0,
+                FOREIGN KEY(presupuesto_id) REFERENCES presupuestos(id) ON DELETE CASCADE
+            )`);
+            await dbRun("CREATE INDEX IF NOT EXISTS idx_presupuestos_cliente ON presupuestos(cliente_id)");
+            await dbRun("CREATE INDEX IF NOT EXISTS idx_presupuestos_estado  ON presupuestos(estado)");
+            await dbRun("CREATE INDEX IF NOT EXISTS idx_presupuestos_fecha   ON presupuestos(fecha_creacion)");
+            await dbRun("CREATE INDEX IF NOT EXISTS idx_presupuesto_items_pz ON presupuesto_items(presupuesto_id)");
+            logger.info('[v21] Tablas presupuestos y presupuesto_items creadas');
+        }
     }
 ];
 
@@ -742,8 +870,19 @@ function hacerBackup() {
     } catch(e) { logger.warn('[Backup] Error limpiando backups:', e.message); }
 }
 
-// Ejecutar backup al inicio (10s después) y luego cada 24h
-setTimeout(() => { hacerBackup(); setInterval(hacerBackup, 24 * 60 * 60 * 1000); }, 10000);
+// Backup programado a las 03:00 (no bloquea el arranque)
+function programarBackupDiario() {
+    const ahora = new Date();
+    const proximo = new Date(ahora);
+    proximo.setHours(3, 0, 0, 0);
+    if (proximo <= ahora) proximo.setDate(proximo.getDate() + 1);
+    const msHasta = proximo.getTime() - ahora.getTime();
+    setTimeout(function () {
+        hacerBackup();
+        setInterval(hacerBackup, 24 * 60 * 60 * 1000);
+    }, msHasta);
+}
+programarBackupDiario();
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 7. AUTENTICACIÓN Y AUTORIZACIÓN
@@ -850,17 +989,17 @@ app.post('/api/login', async (req, res) => {
     } catch(e) { logger.error('Error DB en login', { err: e.message }); return res.status(500).json({ success: false, error: 'Error del servidor.' }); }
 });
 
-app.get('/api/auth/me', verifyToken, async (req, res) => {
+app.get('/api/auth/me', verifyToken, async (req, res, next) => {
     if (req.user.id === 0) return res.json({ user: { id: 0, username: req.user.username, rol: req.user.rol, modulos: ['*'] } });
     try {
         const row = await dbGet("SELECT id, username, rol, modulos FROM usuarios WHERE id = ? AND activo = 1", [req.user.id]);
         if (!row) return res.status(401).json({ error: 'Sesión inválida.' });
         row.modulos = modulosDeUsuario(row.rol, row.modulos);
         res.json({ user: row });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
-app.post('/api/auth/cambiar-password', verifyToken, async (req, res) => {
+app.post('/api/auth/cambiar-password', verifyToken, async (req, res, next) => {
     const { passwordActual, passwordNueva } = req.body;
     if (!passwordActual || !passwordNueva) return res.status(400).json({ error: 'Se requieren ambas contraseñas.' });
     if (passwordNueva.length < 6) return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres.' });
@@ -872,21 +1011,21 @@ app.post('/api/auth/cambiar-password', verifyToken, async (req, res) => {
         const nuevoHash = await bcrypt.hash(passwordNueva, BCRYPT_ROUNDS);
         await dbRun("UPDATE usuarios SET password = ? WHERE id = ?", [nuevoHash, req.user.id]);
         res.json({ success: true, message: 'Contraseña actualizada correctamente.' });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 9. USUARIOS
 // ══════════════════════════════════════════════════════════════════════════════
-app.get('/api/usuarios', ...soloAdmin, async (req, res) => {
+app.get('/api/usuarios', ...soloAdmin, async (req, res, next) => {
     try {
         const rows = await dbAll("SELECT id, username, rol, modulos, activo, ultimo_login, fecha_creacion FROM usuarios ORDER BY id");
         for (const u of rows) u.modulos = u.id === 1 ? ['*'] : modulosDeUsuario(u.rol, u.modulos);
         res.json(rows);
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
-app.post('/api/usuarios', ...soloAdmin, async (req, res) => {
+app.post('/api/usuarios', ...soloAdmin, async (req, res, next) => {
     const { username, password, rol, modulos } = req.body;
     if (!username || !password || !rol) return res.status(400).json({ success: false, error: 'Todos los campos son requeridos.' });
     if (password.length < 6) return res.status(400).json({ success: false, error: 'La contraseña debe tener al menos 6 caracteres.' });
@@ -898,10 +1037,10 @@ app.post('/api/usuarios', ...soloAdmin, async (req, res) => {
         const r = await dbRun("INSERT INTO usuarios (username, password, rol, modulos) VALUES (?, ?, ?, ?)",
             [username, hashed, rol, modulosVal ? JSON.stringify(modulosVal) : null]);
         res.json({ success: true, id: r.lastID });
-    } catch(e) { res.status(500).json({ success: false, error: e.message }); }
+    } catch(e) { next(e); }
 });
 
-app.put('/api/usuarios/:id', ...soloAdmin, async (req, res) => {
+app.put('/api/usuarios/:id', ...soloAdmin, async (req, res, next) => {
     const { password, rol, activo, modulos } = req.body;
     const userId = req.params.id;
     if (String(req.user.id) === String(userId) && activo === 0)
@@ -920,58 +1059,58 @@ app.put('/api/usuarios/:id', ...soloAdmin, async (req, res) => {
         values.push(userId);
         await dbRun(`UPDATE usuarios SET ${updates.join(', ')} WHERE id = ?`, values);
         res.json({ success: true });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
-app.delete('/api/usuarios/:id', ...soloAdmin, async (req, res) => {
+app.delete('/api/usuarios/:id', ...soloAdmin, async (req, res, next) => {
     if (String(req.params.id) === String(req.user.id)) return res.status(403).json({ error: 'No puedes eliminar tu propia cuenta.' });
     if (String(req.params.id) === '1') return res.status(403).json({ error: 'El usuario Administrador principal no puede eliminarse.' });
     try {
         const r = await dbRun("DELETE FROM usuarios WHERE id = ?", [req.params.id]);
         if (r.changes === 0) return res.status(404).json({ error: 'Usuario no encontrado.' });
         res.json({ success: true });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 10. CLIENTES — MEJORA #13: búsqueda por ?q=
 // ══════════════════════════════════════════════════════════════════════════════
-app.get('/api/clientes', verifyToken, requireModulo('clientes','recepcion','taller','ventas'), async (req, res) => {
+app.get('/api/clientes', verifyToken, requireModulo('clientes','recepcion','taller','ventas'), async (req, res, next) => {
     try {
         const q = req.query.q ? `%${req.query.q}%` : null;
         const sql    = q ? "SELECT * FROM clientes WHERE nombre_completo LIKE ? OR celular LIKE ? ORDER BY nombre_completo"
                          : "SELECT * FROM clientes ORDER BY nombre_completo";
         const params = q ? [q, q] : [];
         res.json(await dbAll(sql, params));
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
-app.post('/api/clientes', verifyToken, requireModulo('clientes','recepcion','taller','ventas'), validar('cliente'), async (req, res) => {
+app.post('/api/clientes', verifyToken, requireModulo('clientes','recepcion','taller','ventas'), validar('cliente'), async (req, res, next) => {
     try {
         const { nombre_completo, celular, localidad, direccion } = req.body;
         const r = await dbRun("INSERT INTO clientes (nombre_completo, celular, localidad, direccion) VALUES (?,?,?,?)", [nombre_completo, celular, localidad, direccion]);
         backupService.subirBackup().catch(e => logger.error('[Backup] Trigger falló:', e.message));
         res.json({ id: r.lastID });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
-app.put('/api/clientes/:id', verifyToken, requireModulo('clientes','recepcion','taller','ventas'), validar('cliente'), async (req, res) => {
+app.put('/api/clientes/:id', verifyToken, requireModulo('clientes','recepcion','taller','ventas'), validar('cliente'), async (req, res, next) => {
     try {
         const { nombre_completo, celular, localidad, direccion } = req.body;
         await dbRun("UPDATE clientes SET nombre_completo=?, celular=?, localidad=?, direccion=? WHERE id=?", [nombre_completo, celular, localidad, direccion, req.params.id]);
         res.sendStatus(200);
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
-app.delete('/api/clientes/:id', verifyToken, requireModulo('clientes','recepcion','taller','ventas'), async (req, res) => {
+app.delete('/api/clientes/:id', verifyToken, requireModulo('clientes','recepcion','taller','ventas'), async (req, res, next) => {
     try { await dbRun("DELETE FROM clientes WHERE id=?", [req.params.id]); res.sendStatus(200); }
-    catch(e) { res.status(500).json({ error: e.message }); }
+    catch(e) { next(e); }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 11. ÓRDENES — MEJORA #3: whitelist de campos + #6/#11: notificación WA
 // ══════════════════════════════════════════════════════════════════════════════
-app.get('/api/ordenes', verifyToken, requireModulo('recepcion','taller'), async (req, res) => {
+app.get('/api/ordenes', verifyToken, requireModulo('recepcion','taller'), async (req, res, next) => {
     try {
         const q = req.query.q ? `%${req.query.q}%` : null;
         const sql = q
@@ -979,10 +1118,10 @@ app.get('/api/ordenes', verifyToken, requireModulo('recepcion','taller'), async 
             : `SELECT ordenes.*, clientes.nombre_completo, clientes.celular FROM ordenes JOIN clientes ON ordenes.cliente_id = clientes.id ORDER BY ordenes.id DESC`;
         const params = q ? [q, q, q] : [];
         res.json(await dbAll(sql, params));
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
-app.post('/api/ordenes', verifyToken, requireModulo('recepcion','taller'), validar('orden'), async (req, res) => {
+app.post('/api/ordenes', verifyToken, requireModulo('recepcion','taller'), validar('orden'), async (req, res, next) => {
     try {
         const camposValidos = Object.keys(req.body).filter(k => CAMPOS_ORDEN.includes(k));
         if (camposValidos.length === 0) return res.status(400).json({ error: 'No hay campos válidos.' });
@@ -992,10 +1131,10 @@ app.post('/api/ordenes', verifyToken, requireModulo('recepcion','taller'), valid
         );
         backupService.subirBackup().catch(e => logger.error('[Backup] Trigger falló:', e.message));
         res.json({ id: r.lastID });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
-app.put('/api/ordenes/:id', verifyToken, requireModulo('recepcion','taller'), async (req, res) => {
+app.put('/api/ordenes/:id', verifyToken, requireModulo('recepcion','taller'), async (req, res, next) => {
     const camposValidos = Object.keys(req.body).filter(k => CAMPOS_ORDEN.includes(k));
     if (camposValidos.length === 0) return res.status(400).json({ error: 'No hay campos válidos.' });
     const setClauses = camposValidos.map(f => `${f} = ?`).join(', ');
@@ -1025,15 +1164,28 @@ app.put('/api/ordenes/:id', verifyToken, requireModulo('recepcion','taller'), as
         res.sendStatus(200);
     } catch(e) {
         logger.error('[Ordenes] Error actualizando orden:', e.message);
-        res.status(500).json({ error: e.message });
+        next(e);
     }
 });
 
-app.delete('/api/ordenes/:id', verifyToken, requireModulo('recepcion','taller'), async (req, res) => {
+const _eliminarOrdenTx = db.transaction((id) => {
+    // Si la orden nació de un presupuesto, liberamos el presupuesto para que pueda volver a convertirse.
+    getStatement(`UPDATE presupuestos
+                  SET orden_id = NULL,
+                      estado = CASE WHEN estado = 'convertido' THEN 'aprobado' ELSE estado END,
+                      updated_at = datetime('now')
+                  WHERE orden_id = ?`).run(id);
+    return getStatement('DELETE FROM ordenes WHERE id = ?').run(id);
+});
+
+app.delete('/api/ordenes/:id', verifyToken, requireModulo('recepcion','taller'), async (req, res, next) => {
     try {
-        const r = await dbRun('DELETE FROM ordenes WHERE id = ?', [req.params.id]);
+        const r = _eliminarOrdenTx(req.params.id);
         res.json({ success: true, changes: r.changes });
-    } catch(e) { logger.error('Error eliminando orden:', e); res.status(500).json({ error: e.message }); }
+    } catch(e) {
+        logger.error('Error eliminando orden:', e);
+        next(e);
+    }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1050,9 +1202,371 @@ app.get('/api/ordenes/:id/historial', verifyToken, requireModulo('recepcion','ta
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// 11d. PRESUPUESTOS — cotizaciones, seguimiento y conversión a orden
+// ══════════════════════════════════════════════════════════════════════════════
+const PZ_TRANSICIONES = {
+    borrador:  ['enviado'],
+    enviado:   ['aprobado', 'rechazado'],
+    aprobado:  [],
+    rechazado: [],
+    vencido:   [],
+    convertido:[],
+    anulado:   []
+};
+const PZ_ESTADOS_ORDEN = ['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación', 'En reparación', 'Esperando repuestos', 'Listo'];
+
+function _pzRound2(n) {
+    return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+}
+
+function _pzHttpError(status, message) {
+    const err = new Error(message);
+    err.statusCode = status;
+    return err;
+}
+
+function _pzFechaLocal(d = new Date()) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function _pzAhoraLocal() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${_pzFechaLocal(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function _pzFechaValidez(valor) {
+    const v = String(valor || '').trim();
+    if (!v) {
+        const d = new Date();
+        d.setDate(d.getDate() + 15);
+        return _pzFechaLocal(d);
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) throw _pzHttpError(400, 'La fecha de validez no es válida.');
+    const dt = new Date(v + 'T00:00:00');
+    if (isNaN(dt.getTime()) || _pzFechaLocal(dt) !== v) throw _pzHttpError(400, 'La fecha de validez no es válida.');
+    return v;
+}
+
+function _pzNormalizar(body) {
+    const items = (body.items || []).map((it, idx) => {
+        const cantidad = _pzRound2(Number(it.cantidad) || 0);
+        const precio = _pzRound2(Number(it.precio_unitario) || 0);
+        const descuentoItem = _pzRound2(Number(it.descuento) || 0);
+        const bruto = _pzRound2(cantidad * precio);
+        if (descuentoItem > bruto + 0.009) {
+            throw _pzHttpError(400, `El descuento del ítem ${idx + 1} supera su importe.`);
+        }
+        return {
+            tipo: ['servicio', 'repuesto', 'otro'].includes(it.tipo) ? it.tipo : 'servicio',
+            referencia_id: (it.referencia_id !== undefined && it.referencia_id !== null && it.referencia_id !== '')
+                ? Number(it.referencia_id) : null,
+            descripcion: String(it.descripcion || '').trim(),
+            cantidad,
+            precio_unitario: precio,
+            descuento: descuentoItem,
+            subtotal: _pzRound2(bruto - descuentoItem)
+        };
+    });
+
+    const subtotal = _pzRound2(items.reduce((a, it) => a + it.subtotal, 0));
+    const descuento = _pzRound2(Number(body.descuento) || 0);
+    if (descuento > subtotal + 0.009) throw _pzHttpError(400, 'El descuento global supera el subtotal.');
+    const total = _pzRound2(subtotal - descuento);
+    const sena = _pzRound2(Number(body.sena) || 0);
+    if (sena > total + 0.009) throw _pzHttpError(400, 'La seña no puede superar el total.');
+
+    return {
+        cliente_id: Number(body.cliente_id),
+        tipo_equipo: String(body.tipo_equipo || '').trim(),
+        marca: String(body.marca || '').trim(),
+        modelo: String(body.modelo || '').trim(),
+        falla: String(body.falla || '').trim(),
+        fecha_validez: _pzFechaValidez(body.fecha_validez),
+        notas: String(body.notas || '').trim(),
+        terminos: String(body.terminos || '').trim(),
+        items,
+        subtotal,
+        descuento,
+        total,
+        sena,
+        saldo: _pzRound2(total - sena)
+    };
+}
+
+async function _pzMarcarVencidos() {
+    try {
+        await dbRun(`UPDATE presupuestos SET estado='vencido', updated_at=datetime('now')
+                     WHERE estado='enviado' AND fecha_validez IS NOT NULL
+                       AND date(fecha_validez) < date('now','localtime')`);
+    } catch (e) {
+        logger.warn('[Presupuestos] No se pudieron marcar vencidos:', e.message);
+    }
+}
+
+function _pzResponderError(res, e, contexto) {
+    const status = Number(e.statusCode) || 500;
+    if (status >= 500) logger.error(`[Presupuestos] ${contexto}: ${e.message}`, { stack: e.stack });
+    else logger.warn(`[Presupuestos] ${contexto}: ${e.message}`);
+    res.status(status).json({ error: status >= 500 ? 'Error interno al procesar el presupuesto.' : e.message });
+}
+
+const _pzInsertItems = (() => {
+    const sql = `INSERT INTO presupuesto_items
+        (presupuesto_id, tipo, referencia_id, descripcion, cantidad, precio_unitario, descuento, subtotal, orden)
+        VALUES (?,?,?,?,?,?,?,?,?)`;
+    return (presupuestoId, items) => {
+        const stmt = getStatement(sql);
+        items.forEach((it, i) => stmt.run(
+            presupuestoId, it.tipo, it.referencia_id, it.descripcion,
+            it.cantidad, it.precio_unitario, it.descuento, it.subtotal, i
+        ));
+    };
+})();
+
+const _pzCrearTx = db.transaction((datos) => {
+    const info = getStatement(`INSERT INTO presupuestos
+        (cliente_id, fecha_creacion, fecha_validez, estado, tipo_equipo, marca, modelo, falla,
+         subtotal, descuento, total, sena, saldo, notas, terminos, usuario_creador)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        datos.cliente_id, _pzAhoraLocal(), datos.fecha_validez, 'borrador',
+        datos.tipo_equipo, datos.marca, datos.modelo, datos.falla,
+        datos.subtotal, datos.descuento, datos.total, datos.sena, datos.saldo,
+        datos.notas, datos.terminos, datos.usuario_creador
+    );
+    const id = Number(info.lastInsertRowid);
+    const numero = `PRES-${String(id).padStart(5, '0')}`;
+    getStatement('UPDATE presupuestos SET numero = ? WHERE id = ?').run(numero, id);
+    _pzInsertItems(id, datos.items);
+    return { id, numero };
+});
+
+const _pzActualizarTx = db.transaction((id, datos) => {
+    const info = getStatement(`UPDATE presupuestos SET
+        cliente_id=?, fecha_validez=?, tipo_equipo=?, marca=?, modelo=?, falla=?,
+        subtotal=?, descuento=?, total=?, sena=?, saldo=?, notas=?, terminos=?,
+        updated_at=datetime('now')
+        WHERE id=? AND estado IN ('borrador','enviado') AND orden_id IS NULL`).run(
+        datos.cliente_id, datos.fecha_validez, datos.tipo_equipo, datos.marca, datos.modelo, datos.falla,
+        datos.subtotal, datos.descuento, datos.total, datos.sena, datos.saldo,
+        datos.notas, datos.terminos, id
+    );
+    if (!info.changes) throw _pzHttpError(409, 'El presupuesto ya no se puede editar.');
+    getStatement('DELETE FROM presupuesto_items WHERE presupuesto_id = ?').run(id);
+    _pzInsertItems(id, datos.items);
+    return { changes: info.changes };
+});
+
+const _pzDuplicarTx = db.transaction((id, usuario) => {
+    const p = getStatement('SELECT * FROM presupuestos WHERE id = ?').get(id);
+    if (!p) throw _pzHttpError(404, 'Presupuesto no encontrado.');
+
+    const info = getStatement(`INSERT INTO presupuestos
+        (cliente_id, fecha_creacion, fecha_validez, estado, tipo_equipo, marca, modelo, falla,
+         subtotal, descuento, total, sena, saldo, notas, terminos, usuario_creador)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        p.cliente_id, _pzAhoraLocal(), _pzFechaValidez(), 'borrador',
+        p.tipo_equipo, p.marca, p.modelo, p.falla,
+        p.subtotal, p.descuento, p.total, p.sena, p.saldo,
+        p.notas, p.terminos, usuario
+    );
+    const nuevoId = Number(info.lastInsertRowid);
+    const numero = `PRES-${String(nuevoId).padStart(5, '0')}`;
+    getStatement('UPDATE presupuestos SET numero = ? WHERE id = ?').run(numero, nuevoId);
+
+    const items = getStatement('SELECT * FROM presupuesto_items WHERE presupuesto_id = ? ORDER BY orden, id').all(id);
+    const ins = getStatement(`INSERT INTO presupuesto_items
+        (presupuesto_id, tipo, referencia_id, descripcion, cantidad, precio_unitario, descuento, subtotal, orden)
+        VALUES (?,?,?,?,?,?,?,?,?)`);
+    items.forEach((it, i) => ins.run(
+        nuevoId, it.tipo, it.referencia_id, it.descripcion,
+        it.cantidad, it.precio_unitario, it.descuento, it.subtotal, i
+    ));
+    return { id: nuevoId, numero };
+});
+
+const _pzConvertirTx = db.transaction((id, estadoInicial) => {
+    const p = getStatement('SELECT * FROM presupuestos WHERE id = ?').get(id);
+    if (!p) throw _pzHttpError(404, 'Presupuesto no encontrado.');
+    if (p.orden_id) throw _pzHttpError(409, `El presupuesto ya fue convertido en la orden #${p.orden_id}.`);
+    if (p.estado !== 'aprobado') throw _pzHttpError(409, 'Solo se pueden convertir presupuestos aprobados.');
+
+    const cli = getStatement('SELECT id FROM clientes WHERE id = ?').get(p.cliente_id);
+    if (!cli) throw _pzHttpError(400, 'El cliente del presupuesto ya no existe.');
+
+    const estado = PZ_ESTADOS_ORDEN.includes(estadoInicial) ? estadoInicial : 'En reparación';
+    const notaOrden = `Convertido desde presupuesto ${p.numero || ('#' + p.id)}` + (p.notas ? ` — ${p.notas}` : '');
+
+    const info = getStatement(`INSERT INTO ordenes
+        (cliente_id, fecha_hora, tipo_equipo, marca, modelo, falla, clave, enciende,
+         presupuesto, sena, estado_estetico, accesorios, estado, notas_tecnicas)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        p.cliente_id, _pzAhoraLocal(), p.tipo_equipo || 'Equipo', p.marca || '', p.modelo || '',
+        p.falla || 'Sin falla especificada', null, 1, p.total, p.sena, '', '', estado, notaOrden
+    );
+    const ordenId = Number(info.lastInsertRowid);
+
+    const upd = getStatement(`UPDATE presupuestos SET orden_id=?, estado='convertido', updated_at=datetime('now')
+                              WHERE id=? AND orden_id IS NULL`).run(ordenId, id);
+    if (!upd.changes) throw _pzHttpError(409, 'El presupuesto ya fue convertido.');
+    return { orden_id: ordenId, numero: p.numero };
+});
+
+app.get('/api/presupuestos', verifyToken, requireModulo('recepcion', 'taller'), async (req, res) => {
+    try {
+        await _pzMarcarVencidos();
+        const q = String(req.query.q || '').trim();
+        const estado = String(req.query.estado || '').trim();
+        const desde = String(req.query.desde || '').trim();
+        const hasta = String(req.query.hasta || '').trim();
+        const clienteId = req.query.cliente_id ? Number(req.query.cliente_id) : null;
+
+        let sql = `SELECT p.*, c.nombre_completo, c.celular, c.localidad,
+                          (SELECT COUNT(*) FROM presupuesto_items pi WHERE pi.presupuesto_id = p.id) AS items_count
+                   FROM presupuestos p
+                   JOIN clientes c ON c.id = p.cliente_id
+                   WHERE 1=1`;
+        const params = [];
+        if (q) {
+            const like = `%${q}%`;
+            sql += ` AND (p.numero LIKE ? OR c.nombre_completo LIKE ? OR c.celular LIKE ?
+                       OR p.tipo_equipo LIKE ? OR p.marca LIKE ? OR p.modelo LIKE ? OR p.falla LIKE ?)`;
+            params.push(like, like, like, like, like, like, like);
+        }
+        if (estado && estado !== 'todos') { sql += ` AND p.estado = ?`; params.push(estado); }
+        if (desde) { sql += ` AND date(p.fecha_creacion) >= date(?)`; params.push(desde); }
+        if (hasta) { sql += ` AND date(p.fecha_creacion) <= date(?)`; params.push(hasta); }
+        if (clienteId) { sql += ` AND p.cliente_id = ?`; params.push(clienteId); }
+        sql += ` ORDER BY p.id DESC LIMIT 500`;
+
+        res.json(await dbAll(sql, params));
+    } catch (e) { _pzResponderError(res, e, 'listar'); }
+});
+
+app.get('/api/presupuestos/resumen', verifyToken, requireModulo('recepcion', 'taller'), async (req, res) => {
+    try {
+        await _pzMarcarVencidos();
+        const rows = await dbAll(`SELECT estado, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total
+                                  FROM presupuestos GROUP BY estado`);
+        const estados = {};
+        rows.forEach(r => {
+            estados[r.estado] = { cantidad: Number(r.cantidad), total: _pzRound2(r.total) };
+        });
+        const mes = await dbGet(`SELECT COALESCE(SUM(total),0) AS total FROM presupuestos
+                                 WHERE substr(fecha_creacion,1,7) = strftime('%Y-%m','now','localtime')
+                                   AND estado != 'anulado'`);
+        const porVencer = await dbGet(`SELECT COUNT(*) AS cantidad FROM presupuestos
+                                       WHERE estado='enviado' AND fecha_validez IS NOT NULL
+                                         AND date(fecha_validez) >= date('now','localtime')
+                                         AND date(fecha_validez) <= date('now','localtime','+3 day')`);
+        res.json({
+            estados,
+            total_cotizado_mes: _pzRound2(mes ? mes.total : 0),
+            por_vencer: Number(porVencer ? porVencer.cantidad : 0)
+        });
+    } catch (e) { _pzResponderError(res, e, 'resumen'); }
+});
+
+app.get('/api/presupuestos/:id', verifyToken, requireModulo('recepcion', 'taller'), async (req, res) => {
+    try {
+        await _pzMarcarVencidos();
+        const p = await dbGet(`SELECT p.*, c.nombre_completo, c.celular, c.localidad, c.direccion
+                               FROM presupuestos p JOIN clientes c ON c.id = p.cliente_id
+                               WHERE p.id = ?`, [req.params.id]);
+        if (!p) return res.status(404).json({ error: 'Presupuesto no encontrado.' });
+        p.items = await dbAll('SELECT * FROM presupuesto_items WHERE presupuesto_id = ? ORDER BY orden, id', [p.id]);
+        res.json(p);
+    } catch (e) { _pzResponderError(res, e, 'detalle'); }
+});
+
+app.post('/api/presupuestos', verifyToken, requireModulo('recepcion', 'taller'), validar('presupuesto'), async (req, res) => {
+    try {
+        const cli = await dbGet('SELECT id FROM clientes WHERE id = ?', [req.body.cliente_id]);
+        if (!cli) return res.status(400).json({ error: 'El cliente indicado no existe.' });
+        const datos = _pzNormalizar(req.body);
+        const result = _pzCrearTx({ ...datos, usuario_creador: req.user?.username || 'sistema' });
+        backupService.subirBackup().catch(e => logger.error('[Backup] Trigger falló:', e.message));
+        res.json({ success: true, id: result.id, numero: result.numero });
+    } catch (e) { _pzResponderError(res, e, 'crear'); }
+});
+
+app.put('/api/presupuestos/:id', verifyToken, requireModulo('recepcion', 'taller'), validar('presupuesto'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const actual = await dbGet('SELECT id, estado, orden_id FROM presupuestos WHERE id = ?', [id]);
+        if (!actual) return res.status(404).json({ error: 'Presupuesto no encontrado.' });
+        if (actual.orden_id || !['borrador', 'enviado'].includes(actual.estado)) {
+            return res.status(409).json({ error: 'El presupuesto ya no se puede editar.' });
+        }
+        const cli = await dbGet('SELECT id FROM clientes WHERE id = ?', [req.body.cliente_id]);
+        if (!cli) return res.status(400).json({ error: 'El cliente indicado no existe.' });
+        const datos = _pzNormalizar(req.body);
+        _pzActualizarTx(id, datos);
+        res.json({ success: true, id });
+    } catch (e) { _pzResponderError(res, e, 'actualizar'); }
+});
+
+app.patch('/api/presupuestos/:id/estado', verifyToken, requireModulo('recepcion', 'taller'), async (req, res) => {
+    try {
+        const estado = String(req.body?.estado || '');
+        const motivo = String(req.body?.motivo || '').slice(0, 1000);
+        if (!['enviado', 'aprobado', 'rechazado'].includes(estado)) {
+            return res.status(400).json({ error: 'Estado no válido.' });
+        }
+        const p = await dbGet('SELECT * FROM presupuestos WHERE id = ?', [req.params.id]);
+        if (!p) return res.status(404).json({ error: 'Presupuesto no encontrado.' });
+        const permitidos = PZ_TRANSICIONES[p.estado] || [];
+        if (!permitidos.includes(estado)) {
+            return res.status(409).json({ error: `No se puede pasar de "${p.estado}" a "${estado}".` });
+        }
+        if (estado === 'enviado') {
+            await dbRun(`UPDATE presupuestos SET estado='enviado', enviado_en=?, updated_at=datetime('now') WHERE id=?`,
+                [_pzAhoraLocal(), p.id]);
+        } else if (estado === 'aprobado') {
+            await dbRun(`UPDATE presupuestos SET estado='aprobado', aprobado_en=?, updated_at=datetime('now') WHERE id=?`,
+                [_pzAhoraLocal(), p.id]);
+        } else {
+            await dbRun(`UPDATE presupuestos SET estado='rechazado', motivo_rechazo=?, updated_at=datetime('now') WHERE id=?`,
+                [motivo, p.id]);
+        }
+        res.json({ success: true, estado });
+    } catch (e) { _pzResponderError(res, e, 'estado'); }
+});
+
+app.post('/api/presupuestos/:id/duplicar', verifyToken, requireModulo('recepcion', 'taller'), async (req, res) => {
+    try {
+        const result = _pzDuplicarTx(Number(req.params.id), req.user?.username || 'sistema');
+        res.json({ success: true, ...result });
+    } catch (e) { _pzResponderError(res, e, 'duplicar'); }
+});
+
+app.post('/api/presupuestos/:id/convertir-orden', verifyToken, requireModulo('recepcion', 'taller'), async (req, res) => {
+    try {
+        const estadoInicial = String(req.body?.estado_inicial || 'En reparación');
+        const result = _pzConvertirTx(Number(req.params.id), estadoInicial);
+        backupService.subirBackup().catch(e => logger.error('[Backup] Trigger falló:', e.message));
+        res.json({ success: true, orden_id: result.orden_id, numero: result.numero });
+    } catch (e) { _pzResponderError(res, e, 'convertir'); }
+});
+
+app.patch('/api/presupuestos/:id/anular', verifyToken, requireRol('Administrador'), async (req, res) => {
+    try {
+        const r = await dbRun(`UPDATE presupuestos SET estado='anulado', updated_at=datetime('now')
+                               WHERE id=? AND estado NOT IN ('convertido','anulado')`, [req.params.id]);
+        if (!r.changes) {
+            const p = await dbGet('SELECT estado FROM presupuestos WHERE id = ?', [req.params.id]);
+            if (!p) return res.status(404).json({ error: 'Presupuesto no encontrado.' });
+            return res.status(409).json({ error: 'No se puede anular un presupuesto convertido o ya anulado.' });
+        }
+        res.json({ success: true });
+    } catch (e) { _pzResponderError(res, e, 'anular'); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
 // 11c. PARTES / REPUESTOS — MEJORA #2
 // ══════════════════════════════════════════════════════════════════════════════
-app.get('/api/partes', verifyToken, requireModulo('partes'), async (req, res) => {
+app.get('/api/partes', verifyToken, requireModulo('partes', 'recepcion', 'taller'), async (req, res) => {
     try {
         const q = req.query.q ? `%${req.query.q}%` : null;
         const cat = req.query.categoria || null;
@@ -1135,21 +1649,21 @@ app.delete('/api/catalogo/:id', verifyToken, requireModulo('recepcion'), async (
 
 // ── Categorías de productos (dropdown "Agregar Producto") ──
 // Nota: van ANTES de /api/productos/:id para que no las intercepte el :id
-app.get('/api/productos/categorias', verifyToken, requireModulo('ventas'), async (req, res) => {
+app.get('/api/productos/categorias', verifyToken, requireModulo('ventas'), async (req, res, next) => {
     try { res.json(await dbAll("SELECT id, nombre FROM producto_categorias ORDER BY nombre")); }
-    catch(e) { res.status(500).json({ error: e.message }); }
+    catch(e) { next(e); }
 });
 
-app.post('/api/productos/categorias', verifyToken, requireModulo('ventas'), async (req, res) => {
+app.post('/api/productos/categorias', verifyToken, requireModulo('ventas'), async (req, res, next) => {
     const { nombre } = req.body;
     if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Falta nombre' });
     try {
         await dbRun("INSERT OR IGNORE INTO producto_categorias (nombre) VALUES (?)", [nombre.trim()]);
         res.json({ success: true });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
-app.put('/api/productos/categorias/:id', verifyToken, requireModulo('ventas'), async (req, res) => {
+app.put('/api/productos/categorias/:id', verifyToken, requireModulo('ventas'), async (req, res, next) => {
     const { nombre } = req.body;
     if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Falta nombre' });
     try {
@@ -1163,15 +1677,15 @@ app.put('/api/productos/categorias/:id', verifyToken, requireModulo('ventas'), a
             await dbRun("UPDATE productos SET categoria = ? WHERE categoria = ?", [nuevo, old.nombre]);
         }
         res.json({ success: true });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
-app.delete('/api/productos/categorias/:id', verifyToken, requireModulo('ventas'), async (req, res) => {
+app.delete('/api/productos/categorias/:id', verifyToken, requireModulo('ventas'), async (req, res, next) => {
     try { await dbRun("DELETE FROM producto_categorias WHERE id = ?", [req.params.id]); res.json({ success: true }); }
-    catch(e) { res.status(500).json({ error: e.message }); }
+    catch(e) { next(e); }
 });
 
-app.get('/api/productos', verifyToken, requireModulo('ventas'), async (req, res) => {
+app.get('/api/productos', verifyToken, requireModulo('ventas'), async (req, res, next) => {
     try {
         const q = req.query.q ? `%${req.query.q}%` : null;
         const soloStockBajo = req.query.stock_bajo === '1';
@@ -1181,15 +1695,15 @@ app.get('/api/productos', verifyToken, requireModulo('ventas'), async (req, res)
         if (soloStockBajo) sql += " AND stock <= 3";
         sql += " ORDER BY nombre";
         res.json(await dbAll(sql, params));
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
-app.get('/api/productos/:id', verifyToken, requireModulo('ventas'), async (req, res) => {
+app.get('/api/productos/:id', verifyToken, requireModulo('ventas'), async (req, res, next) => {
     try { res.json(await dbGet("SELECT * FROM productos WHERE id = ?", [req.params.id]) || null); }
-    catch(e) { res.status(500).json({ error: e.message }); }
+    catch(e) { next(e); }
 });
 
-app.post('/api/productos', verifyToken, requireModulo('ventas'), validar('producto'), async (req, res) => {
+app.post('/api/productos', verifyToken, requireModulo('ventas'), validar('producto'), async (req, res, next) => {
     const { codigo, nombre, descripcion, precio, stock, categoria, imagen_url } = req.body;
     try {
         const r = await dbRun("INSERT INTO productos (codigo, nombre, descripcion, precio, stock, categoria, imagen_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -1197,35 +1711,35 @@ app.post('/api/productos', verifyToken, requireModulo('ventas'), validar('produc
         res.json({ success: true, id: r.lastID });
     } catch(e) {
         if (e.message.includes('UNIQUE')) return res.status(400).json({ success: false, error: 'El código ya existe' });
-        res.status(500).json({ success: false, error: e.message });
+        next(e);
     }
 });
 
-app.put('/api/productos/:id', verifyToken, requireModulo('ventas'), async (req, res) => {
+app.put('/api/productos/:id', verifyToken, requireModulo('ventas'), async (req, res, next) => {
     const { nombre, descripcion, precio, stock, categoria, imagen_url } = req.body;
     try {
         await dbRun("UPDATE productos SET nombre=?, descripcion=?, precio=?, stock=?, categoria=?, imagen_url=? WHERE id=?",
             [nombre, descripcion, precio, stock, categoria, imagen_url || '', req.params.id]);
         res.json({ success: true });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
-app.delete('/api/productos/:id', verifyToken, requireModulo('ventas'), async (req, res) => {
+app.delete('/api/productos/:id', verifyToken, requireModulo('ventas'), async (req, res, next) => {
     try { await dbRun("UPDATE productos SET activo = 0 WHERE id = ?", [req.params.id]); res.json({ success: true }); }
-    catch(e) { res.status(500).json({ error: e.message }); }
+    catch(e) { next(e); }
 });
 
-app.put('/api/productos/:id/stock', verifyToken, requireModulo('ventas'), async (req, res) => {
+app.put('/api/productos/:id/stock', verifyToken, requireModulo('ventas'), async (req, res, next) => {
     const { cantidad } = req.body;
     try { await dbRun("UPDATE productos SET stock = stock + ? WHERE id = ?", [cantidad, req.params.id]); res.json({ success: true }); }
-    catch(e) { res.status(500).json({ error: e.message }); }
+    catch(e) { next(e); }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 14. VENTAS — MEJORA #1: transacción async/await sin race condition
 //             MEJORA #9: paginación en listado
 // ══════════════════════════════════════════════════════════════════════════════
-app.get('/api/ventas', verifyToken, requireModulo('ventas','reportes'), async (req, res) => {
+app.get('/api/ventas', verifyToken, requireModulo('ventas','reportes'), async (req, res, next) => {
     try {
         const page   = Math.max(1, parseInt(req.query.page)  || 1);
         const limit  = Math.min(200, parseInt(req.query.limit) || 50);
@@ -1236,20 +1750,20 @@ app.get('/api/ventas', verifyToken, requireModulo('ventas','reportes'), async (r
             [limit, offset]
         );
         res.json({ data: rows, total: countRow.total, page, limit, pages: Math.ceil(countRow.total / limit) });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
-app.get('/api/ventas/:id', verifyToken, requireModulo('ventas','reportes'), async (req, res) => {
+app.get('/api/ventas/:id', verifyToken, requireModulo('ventas','reportes'), async (req, res, next) => {
     try {
         const venta = await dbGet("SELECT * FROM ventas WHERE id = ?", [req.params.id]);
         if (!venta) return res.status(404).json({ error: 'Venta no encontrada' });
         venta.items = await dbAll("SELECT * FROM ventas_detalle WHERE venta_id = ?", [req.params.id]);
         res.json(venta);
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { next(e); }
 });
 
 // MEJORA #1: transacción segura con async/await — sin race condition en COMMIT/ROLLBACK
-app.post('/api/ventas', verifyToken, requireModulo('ventas'), validar('venta'), async (req, res) => {
+app.post('/api/ventas', verifyToken, requireModulo('ventas'), validar('venta'), async (req, res, next) => {
     const { cliente, items, subtotal, descuento, total, metodo_pago, efectivo, cambio, usuario } = req.body;
     const fecha = new Date().toISOString();
     const folio = 'V' + Date.now();
@@ -1281,7 +1795,7 @@ app.post('/api/ventas', verifyToken, requireModulo('ventas'), validar('venta'), 
     } catch(err) {
         try { await dbRun("ROLLBACK"); } catch(_) {}
         logger.error('[Ventas] Error en transacción:', err.message);
-        res.status(500).json({ success: false, error: err.message });
+        next(err);
     }
 });
 
@@ -2254,6 +2768,20 @@ process.on('uncaughtException', (err) => {
     // No cerramos el proceso — dejamos que el watchdog de main.js decida
 });
 
+// Cierre ordenado cuando main.js lo pide o cuando el proceso padre desaparece.
+// Sin esto, al cerrar la app queda un servidor huérfano ocupando el puerto 3000.
+let _cerrarServidor = null;
+process.on('message', (msg) => {
+    if (msg && msg.tipo === 'shutdown') {
+        if (_cerrarServidor) _cerrarServidor('shutdown');
+        else process.exit(0);
+    }
+});
+process.on('disconnect', () => {
+    if (_cerrarServidor) _cerrarServidor('parent-disconnect');
+    else process.exit(0);
+});
+
 // ══════════════════════════════════════════════════════════════════════════════
 // 20. WHATSAPP BOT (whatsapp-web.js) — auto-respuesta IA a mensajes entrantes
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2271,13 +2799,30 @@ async function _iniciarWABot() {
         const sesionDir = path.join(DATA_DIR, 'wa-session');
         if (!fs.existsSync(sesionDir)) mkdirSync(sesionDir, { recursive: true });
         const puppeteer = require('puppeteer-core');
-        const chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-        // Verificar que Chrome existe
-        if (!fs.existsSync(chromePath)) {
-            logger.warn('[WA Bot] Chrome no encontrado en ' + chromePath + ', desactivando bot');
+
+        // Determinar ruta de Chrome - varias posibilidades
+        const chromePaths = [
+            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+            // Rutas comunes de Chromium/Edge
+            'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+            'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+        ];
+        let chromePath = null;
+        for (const p of chromePaths) {
+            if (fs.existsSync(p)) {
+                chromePath = p;
+                logger.info('[WA Bot] Chrome encontrado en: ' + chromePath);
+                break;
+            }
+        }
+        if (!chromePath) {
+            logger.warn('[WA Bot] Chrome no encontrado en rutas estándar. El bot WhatsApp se desactivará.');
+            logger.warn('[WA Bot] Instalá Chrome o ingresá la ruta manualmente en server.js');
             _waIniciando = false;
             return;
         }
+
         waClient = new Client({
             puppeteer: { executablePath: chromePath, headless: true, args: ['--no-sandbox'] },
             session: null,
@@ -2286,7 +2831,6 @@ async function _iniciarWABot() {
         waClient.on('qr', (qr) => {
             waQR = qr;
             logger.info('[WA Bot] QR generado (escanear con WhatsApp) type=' + (typeof qr) + ' len=' + (typeof qr === 'string' ? qr.length : 0) + ' preview=' + (typeof qr === 'string' ? qr.substring(0, 80) : JSON.stringify(qr)));
-            // Generar imagen PNG del QR y guardar como data URL
             try {
                 const QRCode = require('qrcode');
                 QRCode.toDataURL(qr, { width: 300, margin: 1 }, (err, url) => {
@@ -2305,19 +2849,16 @@ async function _iniciarWABot() {
         });
         waClient.on('message', async (msg) => {
             try {
-                if (msg.fromMe) return; // Ignorar mensajes propios
+                if (msg.fromMe) return;
                 const texto = msg.body || '';
                 if (!texto.trim()) return;
                 const contacto = await msg.getContact();
                 const nombre = contacto.pushname || contacto.name || msg.from;
                 const telefono = msg.from;
                 logger.info('[WA Bot] Mensaje de ' + nombre + ': ' + texto.substring(0, 80));
-                // Broadcast para notificación (incluso si IA inactiva)
                 broadcastWS('wa_message', { nombre, texto, telefono, fecha: new Date().toISOString(), origen: 'bot' });
-                // Verificar si auto-respuesta IA está activa
                 const cfg = await dbGet("SELECT valor FROM chatbot_config WHERE clave='ai_activo'");
                 if (!cfg || cfg.valor !== '1') return;
-                // Guardar en DB como consulta pendiente
                 const result = await dbRun(
                     "INSERT INTO consultas_presupuesto (telefono_cliente, nombre_cliente, descripcion, fecha, estado) VALUES (?,?,?,?,?)",
                     [telefono, nombre, texto, new Date().toISOString(), 'pendiente']
@@ -2420,8 +2961,13 @@ app.post('/api/wa-bot/send-message', async (req, res) => {
     }
 });
 
-// Iniciar bot después de que el servidor esté arriba
-setTimeout(_iniciarWABot, 5000);
+// Iniciar bot solo si está habilitado en configuración (opt-in)
+(async function() {
+    try {
+        const cfg = await dbGet("SELECT valor FROM chatbot_config WHERE clave='bot_activo'");
+        if (cfg?.valor === '1') setTimeout(_iniciarWABot, 5000);
+    } catch(_) {}
+})();
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 21. INICIO DEL SERVIDOR
@@ -2429,9 +2975,51 @@ setTimeout(_iniciarWABot, 5000);
 correrMigraciones()
     .then(() => {
         migracionLista = true;
+        // Optimización estadística de SQLite (query planner)
+        try { db.pragma('optimize'); logger.info('[DB] PRAGMA optimize ejecutado'); } catch (_) {}
         const httpServer = http.createServer(app);
         const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
         global._wss = wss;
+
+        httpServer.on('error', (err) => {
+            logger.error('[HTTP] Error del servidor: ' + err.message);
+            if (err.code === 'EADDRINUSE') {
+                // No quedarse vivo sin escuchar: main.js reintenta el arranque
+                setTimeout(() => process.exit(1), 500);
+            }
+        });
+
+        // ── Observabilidad: estado del sistema ───────────────────────────────
+        app.get('/api/health', (req, res) => {
+            const mem = process.memoryUsage();
+            const walPath = path.join(DATA_DIR, 'tecnitec_v31.db-wal');
+            let walSize = 0;
+            try { if (fs.existsSync(walPath)) walSize = fs.statSync(walPath).size; } catch (_) {}
+            let wsClients = 0;
+            try { if (global._wss) wsClients = global._wss.clients.size; } catch (_) {}
+            let waEstado = 'DESCONECTADO';
+            try { if (waClient) waEstado = 'CONECTADO'; } catch (_) {}
+            res.json({
+                ok: true,
+                uptime: process.uptime(),
+                startTime: _startTime,
+                memoria: {
+                    rss: mem.rss,
+                    heapTotal: mem.heapTotal,
+                    heapUsed: mem.heapUsed,
+                    external: mem.external
+                },
+                baseDatos: {
+                    archivo: path.join(DATA_DIR, 'tecnitec_v31.db'),
+                    walKB: Math.round(walSize / 1024)
+                },
+                websocket: { clientes: wsClients },
+                whatsapp: { estado: waEstado },
+                node: process.version,
+                plataforma: process.platform
+            });
+        });
+
         wss.on('connection', async (ws) => {
             logger.info('[WS] Cliente conectado');
             try {
@@ -2477,6 +3065,27 @@ correrMigraciones()
             logger.info('   📁 Logs en: ./logs/                            ');
             logger.info('═══════════════════════════════════════════════  ');
         });
+
+        // ── Cierre limpio al recibir SIGTERM/SIGINT ──────────────────────────
+        let _cerrando = false;
+        async function cerrarServidor(signal) {
+            if (_cerrando) return;
+            _cerrando = true;
+            logger.info(`[Proceso] Cerrando por ${signal}...`);
+            // Si el cierre limpio se traba (Chrome/Puppeteer), forzar salida
+            setTimeout(() => process.exit(0), 6000).unref();
+            try { if (waClient) await waClient.destroy(); } catch (_) {}
+            try { if (global._wss) { for (const ws of global._wss.clients) { try { ws.close(1001, 'Servidor cerrando'); } catch (_) {} } } } catch (_) {}
+            try { httpServer.close(() => {}); } catch (_) {}
+            try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch (_) {}
+            try { db.close(); } catch (_) {}
+            logger.info('[Proceso] Cierre completo.');
+            process.exit(0);
+        }
+        _cerrarServidor = cerrarServidor;
+        process.on('SIGTERM', () => cerrarServidor('SIGTERM'));
+        process.on('SIGINT',  () => cerrarServidor('SIGINT'));
+
     })
     .catch(err => {
         logger.error('Error fatal en migraciones', { err: err.message });

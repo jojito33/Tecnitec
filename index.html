@@ -14,8 +14,8 @@
         frame-src https://web.whatsapp.com https://*.whatsapp.com https://*.whatsapp.net wss://web.whatsapp.com;
         child-src https://web.whatsapp.com https://*.whatsapp.com https://*.whatsapp.net;
     ">
-    <title>TECNITEC CORE v31.81</title>
-    <meta name="app-version" content="31.81.0">
+    <title>TECNITEC CORE v31.82</title>
+    <meta name="app-version" content="31.82.0">
     <style>
         /* ══════════════════════════════════════════════════════
            SISTEMA DE TEMAS — MODO OSCURO (defecto) y MODO CLARO
@@ -1615,6 +1615,878 @@
 
         .wa-conv-item-active .wa-conv-msg {
             color: rgba(255, 255, 255, 0.7);
+        }
+
+        /* ══════════════════════════════════════════════════════
+           MÓDULO PRESUPUESTOS — Recepción
+           ══════════════════════════════════════════════════════ */
+        .pz-tabs {
+            display: flex;
+            gap: 6px;
+            border-bottom: 1px solid var(--accent);
+            margin: 0 0 18px;
+            flex-wrap: wrap;
+        }
+
+        .pz-tab {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            background: transparent;
+            border: none;
+            border-bottom: 3px solid transparent;
+            color: var(--text-muted);
+            font-weight: 700;
+            font-size: 0.88rem;
+            cursor: pointer;
+            border-radius: 10px 10px 0 0;
+        }
+
+        .pz-tab:hover {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .pz-tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+            background: rgba(239, 68, 68, 0.06);
+        }
+
+        .pz-tab-badge {
+            background: var(--primary);
+            color: #fff;
+            font-size: 0.62rem;
+            padding: 1px 7px;
+            border-radius: 20px;
+            font-weight: 900;
+            line-height: 1.5;
+        }
+
+        .pz-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+
+        .pz-head h2 {
+            margin: 0;
+            font-size: 1.25rem;
+            color: var(--text);
+        }
+
+        .pz-head p {
+            margin: 4px 0 0;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        .pz-btn-primary {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 11px 18px;
+            background: linear-gradient(135deg, var(--primary), #f97316);
+            border: none;
+            border-radius: 12px;
+            color: #fff;
+            font-weight: 800;
+            font-size: 0.85rem;
+            cursor: pointer;
+            box-shadow: 0 8px 24px rgba(239, 68, 68, 0.25);
+            white-space: nowrap;
+        }
+
+        .pz-btn-primary:hover {
+            filter: brightness(1.08);
+        }
+
+        .pz-kpis {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .pz-kpi {
+            background: var(--panel);
+            border: 1px solid var(--accent);
+            border-radius: 14px;
+            padding: 14px 16px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .pz-kpi-accent {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+        }
+
+        .pz-kpi-label {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            font-weight: 800;
+        }
+
+        .pz-kpi-value {
+            font-size: 1.35rem;
+            font-weight: 900;
+            color: var(--text);
+            margin-top: 6px;
+            line-height: 1.15;
+        }
+
+        .pz-kpi-sub {
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            margin-top: 3px;
+        }
+
+        .pz-toolbar {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+
+        .pz-toolbar input {
+            flex: 1;
+            min-width: 220px;
+            margin: 0;
+            padding: 10px 12px;
+        }
+
+        .pz-toolbar select {
+            width: auto;
+            margin: 0;
+            padding: 10px 34px 10px 12px;
+        }
+
+        .pz-btn-icon {
+            background: var(--accent);
+            border: none;
+            color: var(--text);
+            border-radius: 10px;
+            padding: 10px 13px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            flex-shrink: 0;
+        }
+
+        .pz-table-wrap {
+            background: var(--panel);
+            border: 1px solid var(--accent);
+            border-radius: 16px;
+            overflow-x: auto;
+        }
+
+        .pz-table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 940px;
+        }
+
+        .pz-table th {
+            text-align: left;
+            padding: 11px 12px;
+            font-size: 0.64rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            background: rgba(0, 0, 0, 0.14);
+            border-bottom: 1px solid var(--accent);
+            font-weight: 800;
+        }
+
+        .pz-table td {
+            padding: 11px 12px;
+            border-bottom: 1px solid var(--accent);
+            font-size: 0.82rem;
+            vertical-align: middle;
+        }
+
+        .pz-table tbody tr:hover {
+            background: rgba(255, 255, 255, 0.025);
+        }
+
+        .pz-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .pz-num {
+            font-family: 'Courier New', monospace;
+            font-weight: 900;
+            color: var(--info, #3b82f6);
+            white-space: nowrap;
+        }
+
+        .pz-money {
+            font-weight: 800;
+            color: var(--success, #10b981);
+            white-space: nowrap;
+        }
+
+        .pz-cli {
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .pz-cli-sub {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .pz-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 9px;
+            border-radius: 20px;
+            font-size: 0.62rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            white-space: nowrap;
+        }
+
+        .pz-actions {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+            flex-wrap: nowrap;
+        }
+
+        .pz-action-btn {
+            background: var(--accent);
+            border: none;
+            color: var(--text);
+            border-radius: 8px;
+            min-width: 30px;
+            height: 30px;
+            padding: 0 5px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+
+        .pz-action-btn:hover {
+            background: var(--primary);
+            color: #fff;
+        }
+
+        .pz-action-select {
+            width: auto;
+            min-width: 108px;
+            padding: 6px 8px;
+            margin: 0;
+            font-size: 0.72rem;
+            border-radius: 8px;
+            background: var(--accent);
+            color: var(--text);
+        }
+
+        .pz-empty {
+            padding: 48px 24px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.88rem;
+        }
+
+        .pz-empty-sm {
+            padding: 14px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.76rem;
+        }
+
+        /* ── Cotizador (modal) ─────────────────────────────── */
+        #modal-presupuesto,
+        #modal-pz-convertir,
+        #modal-pz-motivo {
+            z-index: 9800;
+        }
+
+        .pz-modal-content {
+            width: min(1200px, 97vw);
+            max-height: 93vh;
+            padding: 0;
+            border-radius: 20px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid var(--primary);
+        }
+
+        .pz-modal-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 16px 22px;
+            border-bottom: 1px solid var(--accent);
+            background: linear-gradient(180deg, rgba(239, 68, 68, 0.09), transparent);
+            flex-shrink: 0;
+        }
+
+        .pz-modal-head h3 {
+            margin: 0;
+            font-size: 1.1rem;
+            color: var(--text);
+        }
+
+        .pz-modal-head p {
+            margin: 3px 0 0;
+            font-size: 0.74rem;
+            color: var(--text-muted);
+        }
+
+        .pz-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.35rem;
+            cursor: pointer;
+            line-height: 1;
+            padding: 4px 8px;
+        }
+
+        .pz-close:hover {
+            color: var(--primary);
+        }
+
+        .pz-editor-grid {
+            display: grid;
+            grid-template-columns: 350px minmax(0, 1fr);
+            gap: 16px;
+            padding: 16px 22px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .pz-col {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            min-width: 0;
+        }
+
+        .pz-section {
+            background: var(--bg);
+            border: 1px solid var(--accent);
+            border-radius: 14px;
+            padding: 14px;
+        }
+
+        .pz-section-title {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-weight: 900;
+            color: var(--primary);
+            margin-bottom: 10px;
+        }
+
+        .pz-label {
+            display: block;
+            font-size: 0.66rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            font-weight: 700;
+            margin: 0 0 4px 0;
+        }
+
+        .pz-grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .pz-grid-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+        }
+
+        .pz-input-row {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+        }
+
+        .pz-input-row input {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        .pz-hint {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-top: 6px;
+            line-height: 1.35;
+        }
+
+        .pz-btn-ghost {
+            background: var(--accent);
+            color: var(--text-muted);
+            border: 1px solid transparent;
+            padding: 8px 12px;
+            border-radius: 9px;
+            cursor: pointer;
+            font-size: 0.74rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .pz-btn-ghost:hover {
+            color: var(--text);
+            border-color: var(--primary);
+        }
+
+        .pz-items-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .pz-items-head .pz-section-title {
+            margin: 0;
+        }
+
+        .pz-part-search {
+            position: relative;
+            margin-bottom: 10px;
+        }
+
+        .pz-part-search input {
+            margin: 0;
+        }
+
+        .pz-part-resultados {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: calc(100% + 4px);
+            z-index: 30;
+            background: var(--panel);
+            border: 1px solid var(--accent);
+            border-radius: 12px;
+            box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+            max-height: 260px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        .pz-part-item {
+            padding: 9px 12px;
+            border-bottom: 1px solid var(--accent);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 0.78rem;
+            align-items: center;
+        }
+
+        .pz-part-item:last-child {
+            border-bottom: none;
+        }
+
+        .pz-part-item:hover {
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .pz-items-table {
+            border: 1px solid var(--accent);
+            border-radius: 12px;
+            overflow-x: auto;
+            background: var(--panel);
+        }
+
+        .pz-item-head,
+        .pz-item-row {
+            display: grid;
+            grid-template-columns: 92px minmax(140px, 1fr) 66px 96px 86px 100px 30px;
+            gap: 6px;
+            align-items: center;
+            min-width: 720px;
+        }
+
+        .pz-item-head {
+            padding: 8px 10px;
+            background: rgba(0, 0, 0, 0.14);
+            border-bottom: 1px solid var(--accent);
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            font-weight: 800;
+        }
+
+        .pz-item-row {
+            padding: 7px 10px;
+            border-bottom: 1px solid var(--accent);
+        }
+
+        .pz-item-row:last-child {
+            border-bottom: none;
+        }
+
+        .pz-item-row input,
+        .pz-item-row select {
+            margin: 0;
+            padding: 7px 8px;
+            font-size: 0.78rem;
+        }
+
+        .pz-item-sub {
+            font-size: 0.78rem;
+            font-weight: 800;
+            color: var(--success, #10b981);
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .pz-item-del {
+            background: transparent;
+            border: none;
+            color: var(--primary);
+            cursor: pointer;
+            font-size: 1rem;
+            padding: 0;
+        }
+
+        .pz-totales {
+            margin-top: 12px;
+            border-top: 1px dashed var(--accent);
+            padding-top: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .pz-total-line {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 0.84rem;
+            color: var(--text-muted);
+        }
+
+        .pz-total-line input {
+            width: 130px;
+            margin: 0;
+            text-align: right;
+            padding: 6px 8px;
+        }
+
+        .pz-total-final {
+            font-size: 1.12rem;
+            color: var(--text);
+            font-weight: 900;
+            border-top: 1px solid var(--accent);
+            padding-top: 8px;
+            margin-top: 2px;
+        }
+
+        .pz-total-final span:last-child {
+            color: var(--success, #10b981);
+        }
+
+        .pz-alerta {
+            margin-top: 10px;
+            padding: 9px 12px;
+            border-radius: 9px;
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            color: #fca5a5;
+            font-size: 0.76rem;
+            line-height: 1.35;
+        }
+
+        .pz-modal-foot {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            padding: 13px 22px;
+            border-top: 1px solid var(--accent);
+            background: var(--panel);
+            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+
+        .pz-foot-group {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .pz-btn {
+            padding: 10px 15px;
+            border-radius: 10px;
+            border: none;
+            font-weight: 800;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+
+        .pz-btn-secondary {
+            background: var(--accent);
+            color: var(--text);
+        }
+
+        .pz-btn-secondary:hover {
+            filter: brightness(1.12);
+        }
+
+        .pz-btn-success {
+            background: #10b981;
+            color: #fff;
+        }
+
+        .pz-btn-danger {
+            background: var(--primary);
+            color: #fff;
+        }
+
+        .pz-btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        .pz-locked .pz-editor-grid {
+            opacity: 0.92;
+        }
+
+        .pz-motivo-box {
+            padding: 0 22px 18px;
+        }
+
+        .pz-motivo-box textarea {
+            min-height: 90px;
+            resize: vertical;
+        }
+
+        .pz-conv-resumen {
+            background: var(--bg);
+            border: 1px solid var(--accent);
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin-bottom: 14px;
+            font-size: 0.82rem;
+            line-height: 1.5;
+            color: var(--text);
+        }
+
+        /* ── Documento imprimible ──────────────────────────── */
+        .pz-doc {
+            width: 100%;
+            max-width: 820px;
+            margin: 0 auto;
+            background: #ffffff;
+            color: #111827;
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 12px;
+            line-height: 1.45;
+            padding: 34px 38px;
+        }
+
+        #print-area .pz-doc * {
+            color: inherit;
+        }
+
+        .pz-doc-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 24px;
+            border-bottom: 3px solid #ef4444;
+            padding-bottom: 16px;
+        }
+
+        .pz-doc-brand {
+            display: flex;
+            gap: 14px;
+            align-items: flex-start;
+        }
+
+        .pz-doc-brand img {
+            width: 70px;
+            max-height: 74px;
+            object-fit: contain;
+            filter: none !important;
+        }
+
+        .pz-doc-negocio {
+            font-size: 20px;
+            font-weight: 900;
+            line-height: 1.15;
+            margin-bottom: 4px;
+        }
+
+        .pz-doc-brand .pz-doc-sub {
+            color: #475569;
+            font-size: 11px;
+        }
+
+        .pz-doc-num {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .pz-doc-num .lbl {
+            font-size: 10px;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: #64748b;
+            font-weight: 700;
+        }
+
+        .pz-doc-num .num {
+            font-size: 22px;
+            font-weight: 900;
+            color: #ef4444;
+            margin: 2px 0 6px;
+        }
+
+        .pz-doc-num .fecha {
+            color: #475569;
+            font-size: 11px;
+        }
+
+        .pz-doc-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+            margin: 18px 0;
+        }
+
+        .pz-doc-box {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 10px 12px;
+        }
+
+        .pz-doc-box h4 {
+            margin: 0 0 6px;
+            font-size: 10px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: #ef4444;
+        }
+
+        .pz-doc-box p {
+            margin: 2px 0;
+        }
+
+        .pz-doc-items {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 4px;
+        }
+
+        .pz-doc-items th {
+            background: #f1f5f9;
+            border-bottom: 2px solid #cbd5e1;
+            padding: 7px 8px;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            text-align: left;
+        }
+
+        .pz-doc-items td {
+            border-bottom: 1px solid #e2e8f0;
+            padding: 7px 8px;
+            vertical-align: top;
+        }
+
+        .pz-doc-items .r {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .pz-doc-items .c {
+            text-align: center;
+        }
+
+        .pz-doc-items .pz-doc-tipo {
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #64748b;
+        }
+
+        .pz-doc-totales {
+            margin-left: auto;
+            width: 300px;
+            margin-top: 14px;
+        }
+
+        .pz-doc-totales .row {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 2px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .pz-doc-totales .row.gran {
+            font-size: 16px;
+            font-weight: 900;
+            border-bottom: 3px double #111827;
+            padding: 8px 2px;
+        }
+
+        .pz-doc-cond {
+            margin-top: 20px;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 12px;
+            font-size: 10.5px;
+            color: #475569;
+            white-space: pre-line;
+            line-height: 1.5;
+        }
+
+        .pz-doc-firmas {
+            display: flex;
+            justify-content: space-around;
+            gap: 40px;
+            margin-top: 48px;
+            text-align: center;
+            color: #64748b;
+            font-size: 10px;
+        }
+
+        .pz-doc-firma {
+            flex: 1;
+            border-top: 1px solid #94a3b8;
+            padding-top: 6px;
+        }
+
+        @media (max-width: 980px) {
+            .pz-editor-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .pz-modal-content {
+                width: 98vw;
+            }
         }
     </style>
 
@@ -3322,62 +4194,7 @@
             const area = document.getElementById('content-area');
 
             if (v === 'recepcion') {
-                const ahora = new Date();
-                const localISO = new Date(ahora.getTime() - (ahora.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
-                const fechaLocal = ahora.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                const horaLocal = ahora.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
-                area.innerHTML = `<h1>Recepción</h1>
-                    <div style="display:flex; gap:20px; margin-bottom:12px; font-size:0.85rem; color:var(--text-muted);">
-                        <span>📅 ${fechaLocal}</span>
-                        <span>🕐 ${horaLocal}</span>
-                    </div>
-                    <div style="display:grid; grid-template-columns: 1fr 300px; gap:16px"><div class="card">
-                    <span class="info-label">Nombre del Cliente</span><div class="input-group"><input list="dl-cl" id="o-cliente" oninput="verCl(this.value)"><button class="btn-plus" onclick="prepararNuevoCliente()">+</button></div>
-                    
-                    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:15px">
-                        <div><span class="info-label">Tipo</span><div class="input-group"><select id="o-tipo" style="flex:1;padding:10px 12px;background:var(--bg);color:var(--text);border:1px solid var(--accent);border-radius:8px;font-size:0.9rem;outline:none;" onchange="onCambioTipo()"><option value="">Seleccionar...</option></select><button class="btn-plus" onclick="abrirCat('tipo')">+</button></div></div>
-                        <div><span class="info-label">Marca</span><div class="input-group"><select id="o-marca" style="flex:1;padding:10px 12px;background:var(--bg);color:var(--text);border:1px solid var(--accent);border-radius:8px;font-size:0.9rem;outline:none;" onchange="onCambioMarca()"><option value="">Primero seleccione tipo</option></select><button class="btn-plus" onclick="abrirCat('marca')">+</button></div></div>
-                        <div><span class="info-label">Modelo</span><div class="input-group"><select id="o-modelo" style="flex:1;padding:10px 12px;background:var(--bg);color:var(--text);border:1px solid var(--accent);border-radius:8px;font-size:0.9rem;outline:none;"><option value="">Primero seleccione marca</option></select><button class="btn-plus" onclick="abrirCat('modelo')">+</button></div></div>
-                    </div>
-
-                    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px">
-                        <div><span class="info-label">Presupuesto $</span><input id="o-presupuesto" type="number" placeholder="0" oninput="calcSaldo()" onkeydown="if(event.key==='Enter'){event.preventDefault(); document.getElementById('o-sena').focus();}"></div>
-                        <div><span class="info-label">Seña $</span><input id="o-sena" type="number" placeholder="0" oninput="calcSaldo()" onkeydown="if(event.key==='Enter'){event.preventDefault(); document.getElementById('o-falla').focus();}"></div>
-                        <div><span class="info-label">Saldo $</span><input id="o-saldo" readonly style="color:var(--success); font-weight:bold; background:#070a13"></div>
-                    </div>
-                    <span class="info-label">Falla Reportada</span><input id="o-falla">
-                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px">
-                        <div><span class="info-label">¿Enciende?</span><div id="check-enciende"><span class="check-pill active" onclick="selectSinglePill('check-enciende', this)" data-val="1">SI</span><span class="check-pill" onclick="selectSinglePill('check-enciende', this)" data-val="0">NO</span></div></div>
-                        <div>
-                          <span class="info-label">Clave/Patrón</span>
-                          <div style="display:flex;gap:6px;align-items:center;">
-                            <input id="o-clave" placeholder="PIN, texto..." style="flex:1;margin-bottom:0;">
-                            <button type="button" onclick="abrirModalPatron()"
-                              style="padding:7px 11px;background:var(--accent);border:1px solid #6366f1;border-radius:8px;color:#818cf8;cursor:pointer;font-size:.82rem;white-space:nowrap;flex-shrink:0;font-weight:700;">
-                              🔷 Patrón
-                            </button>
-                          </div>
-                          <input type="hidden" id="o-patron-img">
-                          <input type="hidden" id="o-patron-seq">
-                          <div id="o-patron-preview" style="display:none;margin-top:6px;display:none;align-items:center;gap:8px;">
-                            <img id="o-patron-thumb" style="width:40px;height:40px;border-radius:6px;border:1px solid #6366f1;">
-                            <span id="o-patron-label" style="font-size:.72rem;color:#818cf8;font-family:monospace;"></span>
-                            <button type="button" onclick="limpiarPatron()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:.8rem;padding:0 4px;">✕</button>
-                          </div>
-                        </div>
-                    </div>
-                    <div class="label-with-icon"><span class="info-label" style="margin:0">Estado Estético</span><button class="btn-config-pill" onclick="abrirCat('estetico')" title="Configurar Estados">⚙️</button></div>
-                    <div id="check-list-estetico"></div>
-                    <div class="label-with-icon"><span class="info-label" style="margin:0">Accesorios</span><button class="btn-config-pill" onclick="abrirCat('accesorios')" title="Configurar Accesorios">⚙️</button></div>
-                    <div id="check-list-accesorios"></div>
-                    <input type="hidden" id="o-fecha" value="${localISO}">
-                    <div style="display:grid; grid-template-columns: 1fr 200px; gap:15px; margin-top:20px">
-                        <button onclick="guardarO()" class="nav-btn active" style="text-align:center; margin:0">CREAR ORDEN E IMPRIMIR</button>
-                        <button onclick="nav('recepcion')" style="background:var(--accent); border:none; border-radius:12px; color:white; cursor:pointer; font-weight:bold">LIMPIAR</button>
-                    </div>
-                </div><div id="side-cl"></div></div>`;
-                syncPills();
-                _poblarSelectTipo();
+                renderRecepcion();
             } else if (v === 'taller') {
                 area.innerHTML = `<h1>Taller</h1><div class="input-group"><input type="text" id="taller-search" placeholder="🔍 Buscar por ID, Cliente o Marca..." oninput="tallerBuscar(this.value)"><button onclick="tallerToggleVista()" id="taller-toggle-btn" class="btn-plus" style="width:auto; padding:0 15px; font-size:0.7rem;background:var(--accent);">📋 Etapas</button><button onclick="exportarOrdenesCSV()" class="btn-plus" style="width:auto; padding:0 15px; font-size:0.7rem">📥 CSV</button></div><div style="display:grid; grid-template-columns: 1fr 400px; gap:30px"><div id="taller-grid"></div><div id="taller-kanban" style="display:none;"></div><div id="side-orden"></div></div>`;
                 enriquecerOrdenes();
@@ -5138,6 +5955,17 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
                     showToast("Cliente guardado correctamente", "success");
                     const searchInput = document.getElementById('cl-search');
                     if (searchInput) renderClientes(searchInput.value);
+
+                    // Si el cotizador está abierto, autocompletar el cliente recién creado
+                    if (!id) {
+                        const pzModal = document.getElementById('modal-presupuesto');
+                        const pzInput = document.getElementById('pz-cliente');
+                        if (pzModal && pzModal.style.display === 'flex' && pzInput) {
+                            pzInput.value = nombre.trim();
+                            pzVerCl(nombre.trim());
+                            showToast('👤 Cliente cargado en el presupuesto', 'info');
+                        }
+                    }
                 } else {
                     const err = await r.json().catch(() => ({}));
                     showToast(err.errores ? err.errores.join(', ') : (err.error || 'Error al guardar'), 'error');
@@ -7671,9 +8499,8 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
 
                 if (typeof require !== 'undefined') {
                     try {
-                        const { ipcRenderer } = require('electron');
-                        if (ipcRenderer) {
-                            ipcRenderer.send('cerrar-app');
+                        if (window.electronAPI) {
+                            window.electronAPI.send('cerrar-app');
                         }
                     } catch (e) {
                     }
@@ -8390,17 +9217,28 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                 }
             }
 
-            // Verificar estado de IA y refrescar cada 30s
+            // ── Helper: polling consciente de visibilidad ──────────────────
+            function crearPoll(fn, ms) {
+                var id = null;
+                var tick = function () { if (!document.hidden) fn(); };
+                var start = function () { if (!id) id = setInterval(tick, ms); };
+                var stop = function () { if (id) { clearInterval(id); id = null; } };
+                document.addEventListener('visibilitychange', function () { document.hidden ? stop() : start(); });
+                start();
+                return { stop: stop, start: start };
+            }
+
+            // Verificar estado de IA y refrescar cada 60s
             verificarAI();
             if (window._aiCheckInterval) clearInterval(window._aiCheckInterval);
-            window._aiCheckInterval = setInterval(verificarAI, 30000);
+            window._aiCheckInterval = crearPoll(verificarAI, 60000);
 
             // Poll estado del bot automático al cargar
             _chequearBotQR();
 
-            // Refrescar métricas cada 10 segundos
+            // Refrescar métricas cada 30 segundos
             if (window._metricsInterval) clearInterval(window._metricsInterval);
-            window._metricsInterval = setInterval(async () => {
+            window._metricsInterval = crearPoll(async function () {
                 try {
                     const [convRes, consRes] = await Promise.all([
                         apiFetch(`${API}/chatbot/conversaciones`).then(r => r.json()),
@@ -8421,7 +9259,7 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                         badge.style.display = consRes.length ? '' : 'none';
                     }
                 } catch (e) { }
-            }, 10000);
+            });
         }
 
         // ── Estado IA ─────────────────────────────────────────────────────────────────
@@ -8471,8 +9309,8 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                 console.log('[WA Bot QR] Estado - activo:' + _chatbotActivoCfg + ' qr:' + (qrRes.qr ? 'si' : 'no') + ' conectado:' + qrRes.conectado + ' need_qr:' + qrRes.need_qr);
                 _actualizarBotQRUI(qrRes);
             } catch (e) { console.warn('[WA Bot QR] Error inicial:', e); }
-            if (_botQrInterval) clearInterval(_botQrInterval);
-            _botQrInterval = setInterval(async () => {
+            if (_botQrInterval) _botQrInterval.stop();
+            _botQrInterval = crearPoll(async () => {
                 try {
                     const [qrRes, cfgRes] = await Promise.all([
                         apiFetch(`${API}/wa-bot/qr`).then(r => r.json()).catch(() => ({})),
@@ -8482,7 +9320,7 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                     console.log('[WA Bot QR] Poll - activo:' + _chatbotActivoCfg + ' qr:' + (qrRes.qr ? 'si' : 'no'));
                     _actualizarBotQRUI(qrRes);
                 } catch (e) { }
-            }, 5000);
+            }, 20000);
         }
 
         function _actualizarBotQRUI(data) {
@@ -9152,6 +9990,1289 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
         }
 
 
+        // ══════════════════════════════════════════════════════════════════
+        // MÓDULO PRESUPUESTOS — frontend
+        // ══════════════════════════════════════════════════════════════════
+        let _pzTabActiva = 'orden';
+        let _pzLista = [];
+        let _pzResumen = null;
+        let _pzBusqueda = '';
+        let _pzFiltroEstado = 'todos';
+        let _pzBuscarTimer = null;
+        let _pzCargaSeq = 0;
+        let _pzEditId = null;
+        let _pzEditData = null;
+        let _pzItems = [];
+        let _pzSoloLectura = false;
+        let _pzPartesCache = null;
+        let _pzMotivoId = null;
+        let _pzConvId = null;
+        let _pzConvData = null;
+
+        const _PZ_TERMINOS_DEFAULT = 'Presupuesto válido hasta la fecha indicada. Los precios pueden variar sin previo aviso. La garantía cubre únicamente la falla detallada en este documento. El equipo no retirado dentro de los 30 días posteriores al aviso de finalización podrá generar un cargo por almacenamiento.';
+
+        const _PZ_ESTADOS = {
+            borrador:  { label: 'Borrador',   icon: '📝', color: '#94a3b8', bg: 'rgba(148,163,184,.16)' },
+            enviado:   { label: 'Enviado',    icon: '📤', color: '#60a5fa', bg: 'rgba(59,130,246,.16)' },
+            aprobado:  { label: 'Aprobado',   icon: '✅', color: '#34d399', bg: 'rgba(16,185,129,.16)' },
+            rechazado: { label: 'Rechazado',  icon: '❌', color: '#f87171', bg: 'rgba(239,68,68,.16)' },
+            vencido:   { label: 'Vencido',    icon: '⏳', color: '#fbbf24', bg: 'rgba(245,158,11,.16)' },
+            convertido:{ label: 'Convertido', icon: '🔧', color: '#a78bfa', bg: 'rgba(139,92,246,.16)' },
+            anulado:   { label: 'Anulado',    icon: '🚫', color: '#94a3b8', bg: 'rgba(100,116,139,.16)' }
+        };
+
+        function _pzEsc(v) {
+            if (v === null || v === undefined) return '';
+            return String(v)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function _pzR2(n) {
+            return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+        }
+
+        function _pzMoney(n) {
+            const v = Number(n) || 0;
+            return '$ ' + v.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function _pzNum(n) {
+            return (Number(n) || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 });
+        }
+
+        function _pzFechaCorta(v) {
+            if (!v) return '—';
+            const s = String(v).slice(0, 10);
+            const partes = s.split('-');
+            if (partes.length === 3) return `${partes[2]}/${partes[1]}/${partes[0]}`;
+            return String(v);
+        }
+
+        function _pzHoyISO() {
+            const d = new Date();
+            const pad = n => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        }
+
+        function _pzSumarDiasISO(dias) {
+            const d = new Date();
+            d.setDate(d.getDate() + Number(dias || 0));
+            const pad = n => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        }
+
+        function _pzEstadoMeta(estado) {
+            return _PZ_ESTADOS[estado] || { label: estado || '—', icon: '•', color: '#94a3b8', bg: 'rgba(148,163,184,.16)' };
+        }
+
+        function _pzApiError(data) {
+            if (!data) return 'Error desconocido.';
+            if (Array.isArray(data.errores) && data.errores.length) return data.errores.join(' · ');
+            return data.error || 'Error desconocido.';
+        }
+
+        function _pzUsuario() {
+            try {
+                return (typeof LoginModule !== 'undefined' && LoginModule.getCurrentUser) ? LoginModule.getCurrentUser() : null;
+            } catch (e) { return null; }
+        }
+
+        function _pzParteLabel(p) {
+            return [p.marca, p.modelo, p.descripcion].filter(Boolean).join(' ').trim();
+        }
+
+        function _pzSetVal(id, valor) {
+            const el = document.getElementById(id);
+            if (el) el.value = (valor === null || valor === undefined) ? '' : valor;
+        }
+
+        // ── Recepción con pestañas ──────────────────────────────────────
+        function _pzHtmlNuevaOrden() {
+            const ahora = new Date();
+            const localISO = new Date(ahora.getTime() - (ahora.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+            const fechaLocal = ahora.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            const horaLocal = ahora.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+            return `
+                <div style="display:flex; gap:20px; margin-bottom:12px; font-size:0.85rem; color:var(--text-muted); flex-wrap:wrap;">
+                    <span>📅 ${fechaLocal}</span>
+                    <span>🕐 ${horaLocal}</span>
+                    <span style="color:var(--info);">💡 ¿Solo necesitás cotizar? Usá “Detallar presupuesto”.</span>
+                </div>
+                <div style="display:grid; grid-template-columns: 1fr 300px; gap:16px"><div class="card">
+                <span class="info-label">Nombre del Cliente</span><div class="input-group"><input list="dl-cl" id="o-cliente" oninput="verCl(this.value)"><button class="btn-plus" onclick="prepararNuevoCliente()">+</button></div>
+
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:15px">
+                    <div><span class="info-label">Tipo</span><div class="input-group"><select id="o-tipo" style="flex:1;padding:10px 12px;background:var(--bg);color:var(--text);border:1px solid var(--accent);border-radius:8px;font-size:0.9rem;outline:none;" onchange="onCambioTipo()"><option value="">Seleccionar...</option></select><button class="btn-plus" onclick="abrirCat('tipo')">+</button></div></div>
+                    <div><span class="info-label">Marca</span><div class="input-group"><select id="o-marca" style="flex:1;padding:10px 12px;background:var(--bg);color:var(--text);border:1px solid var(--accent);border-radius:8px;font-size:0.9rem;outline:none;" onchange="onCambioMarca()"><option value="">Primero seleccione tipo</option></select><button class="btn-plus" onclick="abrirCat('marca')">+</button></div></div>
+                    <div><span class="info-label">Modelo</span><div class="input-group"><select id="o-modelo" style="flex:1;padding:10px 12px;background:var(--bg);color:var(--text);border:1px solid var(--accent);border-radius:8px;font-size:0.9rem;outline:none;"><option value="">Primero seleccione marca</option></select><button class="btn-plus" onclick="abrirCat('modelo')">+</button></div></div>
+                </div>
+
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px">
+                    <div><span class="info-label">Presupuesto $</span><input id="o-presupuesto" type="number" placeholder="0" oninput="calcSaldo()" onkeydown="if(event.key==='Enter'){event.preventDefault(); document.getElementById('o-sena').focus();}"></div>
+                    <div><span class="info-label">Seña $</span><input id="o-sena" type="number" placeholder="0" oninput="calcSaldo()" onkeydown="if(event.key==='Enter'){event.preventDefault(); document.getElementById('o-falla').focus();}"></div>
+                    <div><span class="info-label">Saldo $</span><input id="o-saldo" readonly style="color:var(--success); font-weight:bold; background:#070a13"></div>
+                </div>
+                <span class="info-label">Falla Reportada</span><input id="o-falla">
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px">
+                    <div><span class="info-label">¿Enciende?</span><div id="check-enciende"><span class="check-pill active" onclick="selectSinglePill('check-enciende', this)" data-val="1">SI</span><span class="check-pill" onclick="selectSinglePill('check-enciende', this)" data-val="0">NO</span></div></div>
+                    <div>
+                      <span class="info-label">Clave/Patrón</span>
+                      <div style="display:flex;gap:6px;align-items:center;">
+                        <input id="o-clave" placeholder="PIN, texto..." style="flex:1;margin-bottom:0;">
+                        <button type="button" onclick="abrirModalPatron()"
+                          style="padding:7px 11px;background:var(--accent);border:1px solid #6366f1;border-radius:8px;color:#818cf8;cursor:pointer;font-size:.82rem;white-space:nowrap;flex-shrink:0;font-weight:700;">
+                          🔷 Patrón
+                        </button>
+                      </div>
+                      <input type="hidden" id="o-patron-img">
+                      <input type="hidden" id="o-patron-seq">
+                      <div id="o-patron-preview" style="display:none;margin-top:6px;display:none;align-items:center;gap:8px;">
+                        <img id="o-patron-thumb" style="width:40px;height:40px;border-radius:6px;border:1px solid #6366f1;">
+                        <span id="o-patron-label" style="font-size:.72rem;color:#818cf8;font-family:monospace;"></span>
+                        <button type="button" onclick="limpiarPatron()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:.8rem;padding:0 4px;">✕</button>
+                      </div>
+                    </div>
+                </div>
+                <div class="label-with-icon"><span class="info-label" style="margin:0">Estado Estético</span><button class="btn-config-pill" onclick="abrirCat('estetico')" title="Configurar Estados">⚙️</button></div>
+                <div id="check-list-estetico"></div>
+                <div class="label-with-icon"><span class="info-label" style="margin:0">Accesorios</span><button class="btn-config-pill" onclick="abrirCat('accesorios')" title="Configurar Accesorios">⚙️</button></div>
+                <div id="check-list-accesorios"></div>
+                <input type="hidden" id="o-fecha" value="${localISO}">
+                <div style="display:grid; grid-template-columns: 1fr 220px 160px; gap:15px; margin-top:20px">
+                    <button onclick="guardarO()" class="nav-btn active" style="text-align:center; margin:0">CREAR ORDEN E IMPRIMIR</button>
+                    <button onclick="pzDetallarDesdeOrden()" style="background:linear-gradient(135deg,#8b5cf6,#6366f1); border:none; border-radius:12px; color:white; cursor:pointer; font-weight:bold; font-size:0.8rem;">💰 DETALLAR PRESUPUESTO</button>
+                    <button onclick="pzLimpiarFormularioOrden()" style="background:var(--accent); border:none; border-radius:12px; color:white; cursor:pointer; font-weight:bold">LIMPIAR</button>
+                </div>
+            </div><div id="side-cl"></div></div>`;
+        }
+
+        function _pzHtmlLista() {
+            return `
+                <div class="pz-head">
+                    <div>
+                        <h2>💰 Presupuestos</h2>
+                        <p>Cotizaciones, seguimiento y conversión en órdenes de servicio.</p>
+                    </div>
+                    <button class="pz-btn-primary" onclick="pzNuevo()">＋ Nuevo presupuesto</button>
+                </div>
+                <div class="pz-kpis" id="pz-kpis"></div>
+                <div class="pz-toolbar">
+                    <input id="pz-buscar" placeholder="🔍 Buscar por número, cliente, teléfono, equipo o falla..." oninput="pzBuscarDebounced(this.value)">
+                    <select id="pz-filtro-estado" onchange="pzCambiarFiltro(this.value)">
+                        <option value="todos">Todos los estados</option>
+                        <option value="borrador">📝 Borradores</option>
+                        <option value="enviado">📤 Enviados</option>
+                        <option value="aprobado">✅ Aprobados</option>
+                        <option value="rechazado">❌ Rechazados</option>
+                        <option value="vencido">⏳ Vencidos</option>
+                        <option value="convertido">🔧 Convertidos</option>
+                        <option value="anulado">🚫 Anulados</option>
+                    </select>
+                    <button class="pz-btn-icon" onclick="pzCargar()" title="Actualizar">🔄</button>
+                </div>
+                <div id="pz-lista-cont" class="pz-table-wrap">
+                    <div class="pz-empty">Cargando presupuestos...</div>
+                </div>`;
+        }
+
+        function renderRecepcion() {
+            const area = document.getElementById('content-area');
+            if (!area) return;
+            area.innerHTML = `
+                <h1>Recepción</h1>
+                <div class="pz-tabs">
+                    <button class="pz-tab" id="pz-tab-orden" onclick="pzCambiarTab('orden')">📦 Nueva orden</button>
+                    <button class="pz-tab" id="pz-tab-lista" onclick="pzCambiarTab('lista')">💰 Presupuestos <span class="pz-tab-badge" id="pz-tab-badge" style="display:none;">0</span></button>
+                </div>
+                <div id="pz-panel-orden">${_pzHtmlNuevaOrden()}</div>
+                <div id="pz-panel-lista" style="display:none;">${_pzHtmlLista()}</div>`;
+            syncPills();
+            _poblarSelectTipo();
+            pzCambiarTab(_pzTabActiva);
+            pzActualizarBadge();
+        }
+
+        function pzCambiarTab(tab) {
+            _pzTabActiva = (tab === 'lista') ? 'lista' : 'orden';
+            const ordenPanel = document.getElementById('pz-panel-orden');
+            const listaPanel = document.getElementById('pz-panel-lista');
+            if (!ordenPanel || !listaPanel) return;
+            ordenPanel.style.display = (_pzTabActiva === 'orden') ? '' : 'none';
+            listaPanel.style.display = (_pzTabActiva === 'lista') ? '' : 'none';
+            const tabOrden = document.getElementById('pz-tab-orden');
+            const tabLista = document.getElementById('pz-tab-lista');
+            if (tabOrden) tabOrden.classList.toggle('active', _pzTabActiva === 'orden');
+            if (tabLista) tabLista.classList.toggle('active', _pzTabActiva === 'lista');
+            if (_pzTabActiva === 'lista') pzCargar();
+        }
+
+        function pzLimpiarFormularioOrden() {
+            _pzTabActiva = 'orden';
+            renderRecepcion();
+        }
+
+        function pzDetallarDesdeOrden() {
+            const nombre = (document.getElementById('o-cliente')?.value || '').trim();
+            const monto = parseFloat(document.getElementById('o-presupuesto')?.value) || 0;
+            pzNuevo({
+                clienteNombre: nombre,
+                tipo_equipo: document.getElementById('o-tipo')?.value || '',
+                marca: document.getElementById('o-marca')?.value || '',
+                modelo: document.getElementById('o-modelo')?.value || '',
+                falla: document.getElementById('o-falla')?.value || '',
+                monto: monto
+            });
+        }
+
+        // ── Listado, KPIs y filtros ───────────────────────────────────────
+        async function pzActualizarBadge() {
+            try {
+                const r = await apiFetch(`${API}/presupuestos/resumen`);
+                if (!r.ok) return;
+                _pzResumen = await r.json();
+                _pzActualizarBadgeDesdeResumen();
+            } catch (e) { /* silencioso */ }
+        }
+
+        function _pzActualizarBadgeDesdeResumen() {
+            const badge = document.getElementById('pz-tab-badge');
+            if (badge) {
+                const n = Number((_pzResumen?.estados?.enviado || {}).cantidad || 0);
+                badge.textContent = n > 99 ? '99+' : String(n);
+                badge.style.display = n > 0 ? '' : 'none';
+            }
+            if (document.getElementById('pz-kpis')) _pzRenderKPIs();
+        }
+
+        function pzBuscarDebounced(valor) {
+            _pzBusqueda = String(valor || '');
+            clearTimeout(_pzBuscarTimer);
+            _pzBuscarTimer = setTimeout(pzCargar, 280);
+        }
+
+        function pzCambiarFiltro(valor) {
+            _pzFiltroEstado = valor || 'todos';
+            pzCargar();
+        }
+
+        async function pzCargar() {
+            const cont = document.getElementById('pz-lista-cont');
+            if (!cont) return;
+            const seq = ++_pzCargaSeq;
+            cont.innerHTML = '<div class="pz-empty">Cargando presupuestos...</div>';
+            try {
+                const qs = new URLSearchParams();
+                if (_pzBusqueda) qs.set('q', _pzBusqueda);
+                if (_pzFiltroEstado && _pzFiltroEstado !== 'todos') qs.set('estado', _pzFiltroEstado);
+                const [rl, rr] = await Promise.all([
+                    apiFetch(`${API}/presupuestos?${qs.toString()}`),
+                    apiFetch(`${API}/presupuestos/resumen`)
+                ]);
+                if (seq !== _pzCargaSeq) return;
+                const lista = await rl.json().catch(() => null);
+                if (!rl.ok) throw new Error(_pzApiError(lista));
+                _pzLista = Array.isArray(lista) ? lista : [];
+                if (rr.ok) _pzResumen = await rr.json().catch(() => _pzResumen);
+                _pzRenderKPIs();
+                _pzRenderLista();
+                _pzActualizarBadgeDesdeResumen();
+            } catch (e) {
+                if (seq !== _pzCargaSeq) return;
+                cont.innerHTML = `<div class="pz-empty" style="color:var(--primary);">❌ ${_pzEsc(e.message || 'Error al cargar presupuestos')}</div>`;
+            }
+        }
+
+        function _pzRenderKPIs() {
+            const box = document.getElementById('pz-kpis');
+            if (!box) return;
+            const est = (_pzResumen && _pzResumen.estados) || {};
+            const cnt = e => Number((est[e] || {}).cantidad || 0);
+            const emitidos = cnt('aprobado') + cnt('convertido') + cnt('rechazado') + cnt('vencido');
+            const tasa = emitidos > 0 ? Math.round((cnt('convertido') / emitidos) * 100) : 0;
+            const totalMes = Number((_pzResumen || {}).total_cotizado_mes || 0);
+            const porVencer = Number((_pzResumen || {}).por_vencer || 0);
+            const cards = [
+                { label: 'Cotizado este mes', value: _pzMoney(totalMes), sub: 'Sin presupuestos anulados', color: '#3b82f6' },
+                { label: 'Por responder', value: String(cnt('enviado')), sub: 'Enviados al cliente', color: '#f59e0b' },
+                { label: 'Aprobados', value: String(cnt('aprobado')), sub: 'Listos para convertir', color: '#10b981' },
+                { label: 'Tasa de conversión', value: tasa + '%', sub: `${cnt('convertido')} de ${emitidos} cerrados`, color: '#8b5cf6' },
+                { label: 'Por vencer', value: String(porVencer), sub: 'Próximos 3 días', color: '#ef4444' }
+            ];
+            box.innerHTML = cards.map(c => `
+                <div class="pz-kpi">
+                    <span class="pz-kpi-accent" style="background:${c.color}"></span>
+                    <div class="pz-kpi-label">${c.label}</div>
+                    <div class="pz-kpi-value">${c.value}</div>
+                    <div class="pz-kpi-sub">${c.sub}</div>
+                </div>`).join('');
+        }
+
+        function _pzRenderLista() {
+            const cont = document.getElementById('pz-lista-cont');
+            if (!cont) return;
+            if (!_pzLista.length) {
+                cont.innerHTML = `<div class="pz-empty">
+                    <div style="font-size:2.4rem;margin-bottom:10px;">💰</div>
+                    <div style="font-weight:800;color:var(--text);margin-bottom:4px;">Todavía no hay presupuestos</div>
+                    <div style="margin-bottom:14px;">Creá el primero y convertilo en orden cuando el cliente lo apruebe.</div>
+                    <button class="pz-btn-primary" style="margin:0 auto;" onclick="pzNuevo()">＋ Nuevo presupuesto</button>
+                </div>`;
+                return;
+            }
+
+            const filas = _pzLista.map(p => {
+                const meta = _pzEstadoMeta(p.estado);
+                const eq = [p.tipo_equipo, p.marca, p.modelo].filter(Boolean).join(' ') || 'Equipo sin especificar';
+                const editable = ['borrador', 'enviado'].includes(p.estado) && !p.orden_id;
+                const acciones = [];
+                acciones.push(`<option value="editar">${editable ? '✏️ Editar' : '👁️ Ver detalle'}</option>`);
+                if (p.estado === 'borrador') acciones.push('<option value="enviado">📤 Marcar enviado</option>');
+                if (p.estado === 'enviado') {
+                    acciones.push('<option value="aprobado">✅ Aprobar</option>');
+                    acciones.push('<option value="rechazado">❌ Rechazar</option>');
+                }
+                if (p.estado === 'aprobado') acciones.push('<option value="convertir">🔧 Convertir en orden</option>');
+                if (p.orden_id) acciones.push('<option value="orden">🔧 Ver orden vinculada</option>');
+                acciones.push('<option value="duplicar">📄 Duplicar</option>');
+                if (_pzUsuario()?.rol === 'Administrador' && !['convertido', 'anulado'].includes(p.estado)) {
+                    acciones.push('<option value="anular">🚫 Anular</option>');
+                }
+
+                return `<tr>
+                    <td><span class="pz-num">${_pzEsc(p.numero || ('#' + p.id))}</span></td>
+                    <td>
+                        <div class="pz-cli">${_pzEsc(p.nombre_completo || 'Cliente')}</div>
+                        <div class="pz-cli-sub">${_pzEsc(p.celular || 'Sin teléfono')}</div>
+                    </td>
+                    <td>
+                        <div>${_pzEsc(eq)}</div>
+                        <div class="pz-cli-sub">${_pzEsc(String(p.falla || '').slice(0, 60))}</div>
+                    </td>
+                    <td>${_pzFechaCorta(p.fecha_creacion)}</td>
+                    <td>${_pzFechaCorta(p.fecha_validez)}</td>
+                    <td class="pz-money">${_pzMoney(p.total)}</td>
+                    <td><span class="pz-badge" style="color:${meta.color};background:${meta.bg};">${meta.icon} ${meta.label}</span></td>
+                    <td>
+                        <div class="pz-actions">
+                            <button class="pz-action-btn" title="Abrir" onclick="pzAbrirEditor(${p.id})">${editable ? '✏️' : '👁️'}</button>
+                            <button class="pz-action-btn" title="Imprimir" onclick="pzImprimir(${p.id})">🖨️</button>
+                            <button class="pz-action-btn" title="WhatsApp" onclick="pzEnviarWA(${p.id})">📲</button>
+                            ${p.estado === 'enviado' ? `<button class="pz-action-btn" style="background:rgba(16,185,129,.18);color:#10b981;" title="Aprobar" onclick="pzCambiarEstadoUI(${p.id},'aprobado')">✅</button>` : ''}
+                            ${p.estado === 'aprobado' ? `<button class="pz-action-btn" style="width:auto;padding:0 9px;background:rgba(139,92,246,.2);color:#a78bfa;font-size:.66rem;font-weight:800;" title="Convertir en orden" onclick="pzConvertirUI(${p.id})">CONVERTIR</button>` : ''}
+                            <select class="pz-action-select" onchange="pzAccionFila(this, ${p.id})" title="Más acciones">
+                                <option value="">Más…</option>
+                                ${acciones.join('')}
+                            </select>
+                        </div>
+                    </td>
+                </tr>`;
+            }).join('');
+
+            cont.innerHTML = `<table class="pz-table">
+                <thead><tr>
+                    <th>Número</th>
+                    <th>Cliente</th>
+                    <th>Equipo / Falla</th>
+                    <th>Creado</th>
+                    <th>Validez</th>
+                    <th>Total</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                </tr></thead>
+                <tbody>${filas}</tbody>
+            </table>`;
+        }
+
+        function pzAccionFila(sel, id) {
+            const accion = sel.value;
+            sel.value = '';
+            switch (accion) {
+                case 'editar': pzAbrirEditor(id); break;
+                case 'enviado': pzCambiarEstadoUI(id, 'enviado'); break;
+                case 'aprobado': pzCambiarEstadoUI(id, 'aprobado'); break;
+                case 'rechazado': pzAbrirMotivo(id); break;
+                case 'convertir': pzConvertirUI(id); break;
+                case 'orden': nav('taller'); break;
+                case 'duplicar': pzDuplicar(id); break;
+                case 'anular': pzAnular(id); break;
+            }
+        }
+
+        async function pzCambiarEstadoUI(id, estado) {
+            if (estado === 'rechazado') { pzAbrirMotivo(id); return; }
+            const p = _pzLista.find(x => String(x.id) === String(id));
+            const nombre = p ? (p.numero || ('#' + id)) : ('#' + id);
+            const pregunta = estado === 'aprobado'
+                ? `¿Marcar el presupuesto ${nombre} como aprobado?`
+                : `¿Marcar el presupuesto ${nombre} como enviado?`;
+            if (!confirm(pregunta)) return;
+            try {
+                const r = await apiFetch(`${API}/presupuestos/${id}/estado`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ estado })
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(_pzApiError(data));
+                showToast('✅ Estado actualizado', 'success');
+                pzCargar();
+                pzActualizarBadge();
+            } catch (e) {
+                showToast('❌ ' + e.message, 'error');
+            }
+        }
+
+        function pzAbrirMotivo(id) {
+            _pzMotivoId = id;
+            const txt = document.getElementById('pz-motivo-texto');
+            if (txt) txt.value = '';
+            const modal = document.getElementById('modal-pz-motivo');
+            if (modal) modal.style.display = 'flex';
+            setTimeout(() => txt && txt.focus(), 80);
+        }
+
+        function pzCerrarMotivo() {
+            const modal = document.getElementById('modal-pz-motivo');
+            if (modal) modal.style.display = 'none';
+            _pzMotivoId = null;
+        }
+
+        async function pzConfirmarRechazo() {
+            const id = _pzMotivoId;
+            if (!id) return;
+            const motivo = (document.getElementById('pz-motivo-texto')?.value || '').trim();
+            try {
+                const r = await apiFetch(`${API}/presupuestos/${id}/estado`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ estado: 'rechazado', motivo })
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(_pzApiError(data));
+                pzCerrarMotivo();
+                showToast('Presupuesto marcado como rechazado', 'info');
+                pzCargar();
+                pzActualizarBadge();
+            } catch (e) {
+                showToast('❌ ' + e.message, 'error');
+            }
+        }
+
+        async function pzDuplicar(id) {
+            try {
+                const r = await apiFetch(`${API}/presupuestos/${id}/duplicar`, { method: 'POST' });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(_pzApiError(data));
+                showToast(`📄 Presupuesto ${data.numero || ''} creado como borrador`, 'success');
+                await pzCargar();
+                pzActualizarBadge();
+                if (data.id) pzAbrirEditor(data.id);
+            } catch (e) {
+                showToast('❌ ' + e.message, 'error');
+            }
+        }
+
+        async function pzAnular(id) {
+            const usuario = _pzUsuario();
+            if (!usuario || usuario.rol !== 'Administrador') {
+                showToast('🚫 Solo un administrador puede anular presupuestos.', 'warning');
+                return;
+            }
+            if (!confirm('¿Anular este presupuesto? Esta acción no se puede deshacer.')) return;
+            try {
+                const r = await apiFetch(`${API}/presupuestos/${id}/anular`, { method: 'PATCH' });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(_pzApiError(data));
+                showToast('🚫 Presupuesto anulado', 'info');
+                pzCargar();
+                pzActualizarBadge();
+            } catch (e) {
+                showToast('❌ ' + e.message, 'error');
+            }
+        }
+
+        // ── Conversión a orden ────────────────────────────────────────────
+        function pzConvertirUI(id) {
+            const p = _pzLista.find(x => String(x.id) === String(id));
+            if (!p) return;
+            if (p.estado !== 'aprobado') {
+                showToast('Solo se pueden convertir presupuestos aprobados.', 'warning');
+                return;
+            }
+            _pzConvId = id;
+            _pzConvData = p;
+            const eq = [p.tipo_equipo, p.marca, p.modelo].filter(Boolean).join(' ') || 'Equipo sin especificar';
+            const box = document.getElementById('pz-conv-resumen');
+            if (box) {
+                box.innerHTML = `
+                    <div><b>${_pzEsc(p.numero || ('#' + p.id))}</b> — ${_pzEsc(p.nombre_completo || 'Cliente')}</div>
+                    <div style="color:var(--text-muted);margin-top:4px;">${_pzEsc(eq)}</div>
+                    <div style="margin-top:8px;">Total: <b class="pz-money">${_pzMoney(p.total)}</b> · Seña: <b>${_pzMoney(p.sena)}</b> · Saldo: <b>${_pzMoney(p.saldo)}</b></div>`;
+            }
+            const select = document.getElementById('pz-conv-estado');
+            if (select) select.value = 'En reparación';
+            const modal = document.getElementById('modal-pz-convertir');
+            if (modal) modal.style.display = 'flex';
+        }
+
+        function pzCerrarConvertir() {
+            const modal = document.getElementById('modal-pz-convertir');
+            if (modal) modal.style.display = 'none';
+            _pzConvId = null;
+            _pzConvData = null;
+        }
+
+        async function pzConfirmarConversion() {
+            if (!_pzConvId) return;
+            const estadoInicial = document.getElementById('pz-conv-estado')?.value || 'En reparación';
+            try {
+                const r = await apiFetch(`${API}/presupuestos/${_pzConvId}/convertir-orden`, {
+                    method: 'POST',
+                    body: JSON.stringify({ estado_inicial: estadoInicial })
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(_pzApiError(data));
+                pzCerrarConvertir();
+                showToast(`✅ Presupuesto convertido en la orden #${data.orden_id}`, 'success', 5000);
+                pzCargar();
+                pzActualizarBadge();
+                try { await sync(); } catch (e) { /* la lista se refresca igual */ }
+                if (confirm(`Orden #${data.orden_id} creada correctamente.\n\n¿Querés ir al Taller para verla?`)) {
+                    nav('taller');
+                }
+            } catch (e) {
+                showToast('❌ ' + e.message, 'error');
+            }
+        }
+
+        // ── Cotizador ─────────────────────────────────────────────────────
+        function pzNuevo(prefill) {
+            prefill = prefill || {};
+            _pzEditId = null;
+            _pzEditData = null;
+            _pzSoloLectura = false;
+
+            const monto = Number(prefill.monto) || 0;
+            _pzItems = [{
+                tipo: 'servicio',
+                referencia_id: null,
+                descripcion: monto > 0 ? 'Servicio técnico' : '',
+                cantidad: 1,
+                precio_unitario: monto,
+                descuento: 0
+            }];
+
+            const titulo = document.getElementById('pz-modal-title');
+            const sub = document.getElementById('pz-modal-sub');
+            if (titulo) titulo.textContent = '💰 Nuevo presupuesto';
+            if (sub) sub.textContent = 'Completá los datos del cliente y los ítems de la cotización.';
+
+            _pzSetVal('pz-cliente', prefill.clienteNombre || '');
+            _pzSetVal('pz-tipo', prefill.tipo_equipo || '');
+            _pzSetVal('pz-marca', prefill.marca || '');
+            _pzSetVal('pz-modelo', prefill.modelo || '');
+            _pzSetVal('pz-falla', prefill.falla || '');
+            _pzSetVal('pz-validez', _pzSumarDiasISO(15));
+            _pzSetVal('pz-sena', 0);
+            _pzSetVal('pz-descuento', 0);
+            _pzSetVal('pz-notas', '');
+            _pzSetVal('pz-terminos', _PZ_TERMINOS_DEFAULT);
+
+            const modal = document.getElementById('modal-presupuesto');
+            if (modal) {
+                modal.classList.remove('pz-locked');
+                modal.style.display = 'flex';
+            }
+            const guardarBtn = document.getElementById('pz-btn-guardar');
+            if (guardarBtn) guardarBtn.textContent = '💾 Guardar borrador';
+            const cliModal = document.getElementById('modal-cliente');
+            if (cliModal) cliModal.style.zIndex = '9900';
+            pzVerCl(prefill.clienteNombre || '');
+            pzRenderItems();
+            pzRecalcular();
+            pzAplicarSoloLectura();
+            pzCargarPartes();
+            setTimeout(() => document.getElementById('pz-cliente')?.focus(), 90);
+        }
+
+        async function pzAbrirEditor(id) {
+            try {
+                const r = await apiFetch(`${API}/presupuestos/${id}`);
+                const p = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(_pzApiError(p));
+                _pzEditId = p.id;
+                _pzEditData = p;
+                _pzSoloLectura = !['borrador', 'enviado'].includes(p.estado) || !!p.orden_id;
+                _pzItems = (p.items || []).map(it => ({
+                    tipo: it.tipo || 'servicio',
+                    referencia_id: it.referencia_id || null,
+                    descripcion: it.descripcion || '',
+                    cantidad: Number(it.cantidad) || 1,
+                    precio_unitario: Number(it.precio_unitario) || 0,
+                    descuento: Number(it.descuento) || 0
+                }));
+                if (!_pzItems.length) {
+                    _pzItems = [{ tipo: 'servicio', referencia_id: null, descripcion: '', cantidad: 1, precio_unitario: 0, descuento: 0 }];
+                }
+
+                const meta = _pzEstadoMeta(p.estado);
+                const titulo = document.getElementById('pz-modal-title');
+                const sub = document.getElementById('pz-modal-sub');
+                if (titulo) titulo.textContent = `${p.numero || 'Presupuesto'} — ${meta.icon} ${meta.label}`;
+                if (sub) {
+                    sub.textContent = p.orden_id
+                        ? `Convertido en la orden #${p.orden_id} · Cliente: ${p.nombre_completo || ''}`
+                        : `Cliente: ${p.nombre_completo || ''} · Creado ${_pzFechaCorta(p.fecha_creacion)}`;
+                }
+
+                _pzSetVal('pz-cliente', p.nombre_completo || '');
+                _pzSetVal('pz-tipo', p.tipo_equipo || '');
+                _pzSetVal('pz-marca', p.marca || '');
+                _pzSetVal('pz-modelo', p.modelo || '');
+                _pzSetVal('pz-falla', p.falla || '');
+                _pzSetVal('pz-validez', p.fecha_validez || '');
+                _pzSetVal('pz-sena', p.sena || 0);
+                _pzSetVal('pz-descuento', p.descuento || 0);
+                _pzSetVal('pz-notas', p.notas || '');
+                _pzSetVal('pz-terminos', p.terminos || _PZ_TERMINOS_DEFAULT);
+
+                const modal = document.getElementById('modal-presupuesto');
+                if (modal) {
+                    modal.classList.toggle('pz-locked', _pzSoloLectura);
+                    modal.style.display = 'flex';
+                }
+                const guardarBtn = document.getElementById('pz-btn-guardar');
+                if (guardarBtn) guardarBtn.textContent = (p.estado === 'borrador') ? '💾 Guardar borrador' : '💾 Guardar cambios';
+                const cliModal = document.getElementById('modal-cliente');
+                if (cliModal) cliModal.style.zIndex = '9900';
+                pzVerCl(p.nombre_completo || '');
+                pzRenderItems();
+                pzRecalcular();
+                pzAplicarSoloLectura();
+                pzCargarPartes();
+                const grid = document.querySelector('.pz-editor-grid');
+                if (grid) grid.scrollTop = 0;
+            } catch (e) {
+                showToast('❌ ' + e.message, 'error');
+            }
+        }
+
+        function pzAplicarSoloLectura() {
+            const lock = _pzSoloLectura;
+            ['pz-cliente', 'pz-tipo', 'pz-marca', 'pz-modelo', 'pz-falla', 'pz-validez',
+                'pz-sena', 'pz-notas', 'pz-terminos', 'pz-descuento', 'pz-part-buscar'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.disabled = lock;
+                });
+            const addBtn = document.getElementById('pz-btn-add-item');
+            if (addBtn) addBtn.style.display = lock ? 'none' : '';
+            const nuevoCli = document.getElementById('pz-btn-nuevo-cliente');
+            if (nuevoCli) nuevoCli.style.display = lock ? 'none' : '';
+            const search = document.getElementById('pz-part-search');
+            if (search) search.style.display = lock ? 'none' : '';
+            const guardar = document.getElementById('pz-btn-guardar');
+            if (guardar) guardar.style.display = lock ? 'none' : '';
+            const enviar = document.getElementById('pz-btn-enviar');
+            if (enviar) {
+                const yaEnviado = _pzEditData && _pzEditData.estado !== 'borrador';
+                enviar.style.display = (lock || yaEnviado) ? 'none' : '';
+            }
+        }
+
+        function pzCerrarEditor() {
+            const modal = document.getElementById('modal-presupuesto');
+            if (modal) modal.style.display = 'none';
+            const resultados = document.getElementById('pz-part-resultados');
+            if (resultados) resultados.style.display = 'none';
+            const cliModal = document.getElementById('modal-cliente');
+            if (cliModal) cliModal.style.zIndex = '';
+            _pzSoloLectura = false;
+        }
+
+        function pzVerCl(valor) {
+            const hint = document.getElementById('pz-cliente-hint');
+            if (!hint) return;
+            const v = String(valor || '').trim();
+            const cl = store.clientes.find(c => c.nombre_completo === v);
+            if (!cl) {
+                if (v) {
+                    hint.innerHTML = '⚠️ Cliente no encontrado. Usá “+ Nuevo” para registrarlo.';
+                    hint.style.color = '#f59e0b';
+                } else {
+                    hint.innerHTML = 'Buscá un cliente existente o creá uno nuevo.';
+                    hint.style.color = '';
+                }
+                return;
+            }
+            hint.innerHTML = `✅ <b>${_pzEsc(cl.nombre_completo)}</b> · ${_pzEsc(cl.celular || 'sin teléfono')}${cl.localidad ? ' · ' + _pzEsc(cl.localidad) : ''}`;
+            hint.style.color = 'var(--success)';
+        }
+
+        function _pzItemSubtotal(it) {
+            const bruto = _pzR2((Number(it.cantidad) || 0) * (Number(it.precio_unitario) || 0));
+            return _pzR2(bruto - (Number(it.descuento) || 0));
+        }
+
+        function pzRenderItems() {
+            const body = document.getElementById('pz-items-body');
+            if (!body) return;
+            const dis = _pzSoloLectura ? 'disabled' : '';
+            if (!_pzItems.length) {
+                body.innerHTML = '<div class="pz-empty-sm">Sin ítems. Agregá un repuesto desde Partes o un ítem manual.</div>';
+                return;
+            }
+            body.innerHTML = _pzItems.map((it, i) => `
+                <div class="pz-item-row" data-idx="${i}">
+                    <select onchange="pzItemSet(${i},'tipo',this.value)" ${dis}>
+                        <option value="servicio" ${it.tipo === 'servicio' ? 'selected' : ''}>Servicio</option>
+                        <option value="repuesto" ${it.tipo === 'repuesto' ? 'selected' : ''}>Repuesto</option>
+                        <option value="otro" ${it.tipo === 'otro' ? 'selected' : ''}>Otro</option>
+                    </select>
+                    <input data-field="descripcion" value="${_pzEsc(it.descripcion)}" placeholder="Descripción del ítem..." oninput="pzItemDesc(${i}, this.value)" ${dis}>
+                    <input data-field="cantidad" type="number" min="0.01" step="0.01" value="${it.cantidad}" oninput="pzItemSet(${i},'cantidad',this.value)" ${dis}>
+                    <input data-field="precio_unitario" type="number" min="0" step="0.01" value="${it.precio_unitario}" oninput="pzItemSet(${i},'precio_unitario',this.value)" ${dis}>
+                    <input data-field="descuento" type="number" min="0" step="0.01" value="${it.descuento}" oninput="pzItemSet(${i},'descuento',this.value)" ${dis}>
+                    <span class="pz-item-sub" data-sub="${i}">${_pzMoney(_pzItemSubtotal(it))}</span>
+                    ${_pzSoloLectura ? '<span></span>' : `<button type="button" class="pz-item-del" onclick="pzEliminarItem(${i})" title="Eliminar ítem">✕</button>`}
+                </div>`).join('');
+        }
+
+        function pzItemSet(i, campo, valor) {
+            const it = _pzItems[i];
+            if (!it) return;
+            it[campo] = (campo === 'tipo') ? valor : (Number(valor) || 0);
+            pzRecalcular();
+        }
+
+        function pzItemDesc(i, valor) {
+            const it = _pzItems[i];
+            if (!it) return;
+            it.descripcion = valor;
+            const q = String(valor || '').trim().toLowerCase();
+            if (q && !it.referencia_id && (!it.precio_unitario || it.precio_unitario <= 0) && Array.isArray(_pzPartesCache)) {
+                const part = _pzPartesCache.find(p =>
+                    _pzParteLabel(p).toLowerCase() === q ||
+                    String(p.descripcion || '').toLowerCase() === q
+                );
+                if (part) {
+                    it.referencia_id = part.id;
+                    it.tipo = 'repuesto';
+                    it.precio_unitario = Number(part.precio) || 0;
+                    const row = document.querySelector(`.pz-item-row[data-idx="${i}"]`);
+                    if (row) {
+                        const price = row.querySelector('input[data-field="precio_unitario"]');
+                        if (price) price.value = it.precio_unitario;
+                        const sel = row.querySelector('select');
+                        if (sel) sel.value = 'repuesto';
+                    }
+                }
+            }
+            pzRecalcular();
+        }
+
+        function pzAgregarItem() {
+            if (_pzSoloLectura) return;
+            _pzItems.push({ tipo: 'servicio', referencia_id: null, descripcion: '', cantidad: 1, precio_unitario: 0, descuento: 0 });
+            pzRenderItems();
+            pzRecalcular();
+            const rows = document.querySelectorAll('.pz-item-row');
+            const ultima = rows[rows.length - 1];
+            ultima?.querySelector('input[data-field="descripcion"]')?.focus();
+        }
+
+        function pzEliminarItem(i) {
+            if (_pzSoloLectura) return;
+            _pzItems.splice(i, 1);
+            pzRenderItems();
+            pzRecalcular();
+        }
+
+        function pzRecalcular() {
+            const subtotal = _pzR2(_pzItems.reduce((a, it) => a + _pzItemSubtotal(it), 0));
+            const desc = _pzR2(Math.max(0, Number(document.getElementById('pz-descuento')?.value) || 0));
+            const total = _pzR2(Math.max(0, subtotal - desc));
+            const sena = _pzR2(Math.max(0, Number(document.getElementById('pz-sena')?.value) || 0));
+            const saldo = _pzR2(total - sena);
+
+            const elSub = document.getElementById('pz-subtotal');
+            const elTot = document.getElementById('pz-total');
+            const elSal = document.getElementById('pz-saldo');
+            if (elSub) elSub.textContent = _pzMoney(subtotal);
+            if (elTot) elTot.textContent = _pzMoney(total);
+            if (elSal) elSal.textContent = _pzMoney(saldo);
+
+            _pzItems.forEach((it, i) => {
+                const el = document.querySelector(`.pz-item-sub[data-sub="${i}"]`);
+                if (el) el.textContent = _pzMoney(_pzItemSubtotal(it));
+            });
+
+            const alerta = document.getElementById('pz-alerta');
+            if (alerta) {
+                const avisos = [];
+                if (desc > subtotal + 0.009) avisos.push('El descuento global no puede superar el subtotal.');
+                if (sena > total + 0.009) avisos.push('La seña no puede superar el total.');
+                if (avisos.length) {
+                    alerta.style.display = 'block';
+                    alerta.textContent = '⚠️ ' + avisos.join(' ');
+                } else {
+                    alerta.style.display = 'none';
+                }
+            }
+        }
+
+        async function pzCargarPartes() {
+            if (Array.isArray(_pzPartesCache)) return _pzPartesCache;
+            try {
+                const r = await apiFetch(`${API}/partes`);
+                if (r.ok) {
+                    const data = await r.json();
+                    _pzPartesCache = Array.isArray(data) ? data : [];
+                }
+            } catch (e) { /* silencioso */ }
+            return _pzPartesCache || [];
+        }
+
+        async function pzBuscarPartes(q) {
+            const box = document.getElementById('pz-part-resultados');
+            if (!box || _pzSoloLectura) return;
+            const query = String(q || '').trim().toLowerCase();
+            if (!query) { box.style.display = 'none'; box.innerHTML = ''; return; }
+            if (!Array.isArray(_pzPartesCache)) {
+                await pzCargarPartes();
+                if (!document.getElementById('pz-part-resultados')) return;
+            }
+            const resultados = (_pzPartesCache || []).filter(p =>
+                [p.marca, p.modelo, p.descripcion, p.categoria].join(' ').toLowerCase().includes(query)
+            ).slice(0, 8);
+
+            if (!resultados.length) {
+                box.innerHTML = '<div class="pz-empty-sm">Sin repuestos que coincidan.</div>';
+                box.style.display = 'block';
+                return;
+            }
+            box.innerHTML = resultados.map(p => `
+                <div class="pz-part-item" onmousedown="event.preventDefault()" onclick="pzAgregarParte(${p.id})">
+                    <div>
+                        <b>${_pzEsc(p.marca || '')} ${_pzEsc(p.modelo || '')}</b>
+                        <div class="pz-cli-sub">${_pzEsc(p.descripcion || p.categoria || '')}</div>
+                    </div>
+                    <div class="pz-money">${_pzMoney(p.precio)}</div>
+                </div>`).join('');
+            box.style.display = 'block';
+        }
+
+        function pzAgregarParte(id) {
+            const part = (_pzPartesCache || []).find(p => String(p.id) === String(id));
+            if (!part) return;
+            _pzItems.push({
+                tipo: 'repuesto',
+                referencia_id: part.id,
+                descripcion: _pzParteLabel(part),
+                cantidad: 1,
+                precio_unitario: Number(part.precio) || 0,
+                descuento: 0
+            });
+            _pzSetVal('pz-part-buscar', '');
+            const box = document.getElementById('pz-part-resultados');
+            if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+            pzRenderItems();
+            pzRecalcular();
+        }
+
+        // ── Guardar presupuesto ───────────────────────────────────────────
+        async function pzGuardar(marcarEnviado) {
+            if (_pzSoloLectura) return;
+
+            const clienteNombre = (document.getElementById('pz-cliente')?.value || '').trim();
+            const cl = store.clientes.find(c => c.nombre_completo === clienteNombre);
+            if (!cl) {
+                showToast('❌ Seleccioná un cliente válido o creá uno nuevo.', 'warning');
+                document.getElementById('pz-cliente')?.focus();
+                return;
+            }
+            const tipo = (document.getElementById('pz-tipo')?.value || '').trim();
+            if (!tipo) {
+                showToast('❌ Indicá el tipo de equipo.', 'warning');
+                document.getElementById('pz-tipo')?.focus();
+                return;
+            }
+            const falla = (document.getElementById('pz-falla')?.value || '').trim();
+            if (falla.length < 3) {
+                showToast('❌ Describí la falla reportada (mínimo 3 caracteres).', 'warning');
+                document.getElementById('pz-falla')?.focus();
+                return;
+            }
+
+            const items = _pzItems
+                .map(it => ({
+                    tipo: it.tipo,
+                    referencia_id: it.referencia_id || null,
+                    descripcion: String(it.descripcion || '').trim(),
+                    cantidad: Number(it.cantidad) || 0,
+                    precio_unitario: Number(it.precio_unitario) || 0,
+                    descuento: Number(it.descuento) || 0
+                }))
+                .filter(it => it.descripcion.length > 0);
+
+            if (!items.length) {
+                showToast('❌ Agregá al menos un ítem con descripción.', 'warning');
+                return;
+            }
+
+            const itemInvalido = items.find(it => !(Number(it.cantidad) > 0));
+            if (itemInvalido) {
+                showToast('❌ La cantidad de todos los ítems debe ser mayor a cero.', 'warning');
+                return;
+            }
+
+            const subtotal = _pzR2(items.reduce((a, it) => a + _pzItemSubtotal(it), 0));
+            const descuento = _pzR2(Math.max(0, Number(document.getElementById('pz-descuento')?.value) || 0));
+            if (descuento > subtotal + 0.009) {
+                showToast('❌ El descuento global no puede superar el subtotal.', 'warning');
+                return;
+            }
+            const total = _pzR2(subtotal - descuento);
+            const sena = _pzR2(Math.max(0, Number(document.getElementById('pz-sena')?.value) || 0));
+            if (sena > total + 0.009) {
+                showToast('❌ La seña no puede superar el total.', 'warning');
+                return;
+            }
+
+            const payload = {
+                cliente_id: cl.id,
+                tipo_equipo: tipo,
+                marca: (document.getElementById('pz-marca')?.value || '').trim(),
+                modelo: (document.getElementById('pz-modelo')?.value || '').trim(),
+                falla: falla,
+                fecha_validez: document.getElementById('pz-validez')?.value || '',
+                descuento: descuento,
+                sena: sena,
+                notas: (document.getElementById('pz-notas')?.value || '').trim(),
+                terminos: (document.getElementById('pz-terminos')?.value || '').trim(),
+                items: items
+            };
+
+            const esNuevo = !_pzEditId;
+            const estadoActual = esNuevo ? 'borrador' : ((_pzEditData && _pzEditData.estado) || 'borrador');
+
+            try {
+                const r = await apiFetch(esNuevo ? `${API}/presupuestos` : `${API}/presupuestos/${_pzEditId}`, {
+                    method: esNuevo ? 'POST' : 'PUT',
+                    body: JSON.stringify(payload)
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    showToast('❌ ' + _pzApiError(data), 'error', 6500);
+                    return;
+                }
+
+                const id = esNuevo ? data.id : _pzEditId;
+                if (marcarEnviado && id && estadoActual === 'borrador') {
+                    const r2 = await apiFetch(`${API}/presupuestos/${id}/estado`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ estado: 'enviado' })
+                    });
+                    if (!r2.ok) {
+                        const d2 = await r2.json().catch(() => ({}));
+                        showToast('⚠️ Guardado, pero no se pudo marcar como enviado: ' + _pzApiError(d2), 'warning', 6000);
+                    }
+                }
+
+                showToast(esNuevo ? `✅ Presupuesto ${data.numero || ''} creado` : '✅ Presupuesto actualizado', 'success');
+                pzCerrarEditor();
+                pzActualizarBadge();
+                if (document.getElementById('pz-lista-cont')) pzCargar();
+            } catch (e) {
+                showToast('❌ Error de conexión al guardar el presupuesto.', 'error');
+            }
+        }
+
+        function _pzPayloadFormulario() {
+            const clienteNombre = (document.getElementById('pz-cliente')?.value || '').trim();
+            const cl = store.clientes.find(c => c.nombre_completo === clienteNombre) || {};
+            const items = _pzItems
+                .map(it => ({
+                    tipo: it.tipo,
+                    referencia_id: it.referencia_id || null,
+                    descripcion: String(it.descripcion || '').trim(),
+                    cantidad: Number(it.cantidad) || 0,
+                    precio_unitario: Number(it.precio_unitario) || 0,
+                    descuento: Number(it.descuento) || 0,
+                    subtotal: _pzItemSubtotal(it)
+                }))
+                .filter(it => it.descripcion.length > 0);
+
+            const subtotal = _pzR2(items.reduce((a, it) => a + it.subtotal, 0));
+            const descuento = _pzR2(Math.max(0, Number(document.getElementById('pz-descuento')?.value) || 0));
+            const total = _pzR2(Math.max(0, subtotal - descuento));
+            const sena = _pzR2(Math.max(0, Number(document.getElementById('pz-sena')?.value) || 0));
+
+            return {
+                id: _pzEditId,
+                numero: (_pzEditData && _pzEditData.numero) || 'BORRADOR',
+                nombre_completo: cl.nombre_completo || clienteNombre || 'Cliente',
+                celular: cl.celular || '',
+                localidad: cl.localidad || '',
+                direccion: cl.direccion || '',
+                tipo_equipo: (document.getElementById('pz-tipo')?.value || '').trim(),
+                marca: (document.getElementById('pz-marca')?.value || '').trim(),
+                modelo: (document.getElementById('pz-modelo')?.value || '').trim(),
+                falla: (document.getElementById('pz-falla')?.value || '').trim(),
+                fecha_creacion: (_pzEditData && _pzEditData.fecha_creacion) || _pzHoyISO(),
+                fecha_validez: document.getElementById('pz-validez')?.value || _pzSumarDiasISO(15),
+                estado: (_pzEditData && _pzEditData.estado) || 'borrador',
+                subtotal: subtotal,
+                descuento: descuento,
+                total: total,
+                sena: sena,
+                saldo: _pzR2(total - sena),
+                notas: (document.getElementById('pz-notas')?.value || '').trim(),
+                terminos: (document.getElementById('pz-terminos')?.value || '').trim(),
+                items: items
+            };
+        }
+
+        // ── Impresión / PDF ───────────────────────────────────────────────
+        function _pzDocHTML(p) {
+            const t = store.ticket || {};
+            const eq = [p.tipo_equipo, p.marca, p.modelo].filter(Boolean).join(' ');
+            const items = Array.isArray(p.items) ? p.items : [];
+            const filas = items.map((it, i) => {
+                const sub = (it.subtotal !== undefined) ? it.subtotal : _pzItemSubtotal(it);
+                return `<tr>
+                    <td class="c">${i + 1}</td>
+                    <td><div class="pz-doc-tipo">${_pzEsc(it.tipo || 'servicio')}</div>${_pzEsc(it.descripcion || '')}</td>
+                    <td class="c">${_pzNum(it.cantidad)}</td>
+                    <td class="r">${_pzMoney(it.precio_unitario)}</td>
+                    <td class="r">${Number(it.descuento) > 0 ? '- ' + _pzMoney(it.descuento) : '—'}</td>
+                    <td class="r"><b>${_pzMoney(sub)}</b></td>
+                </tr>`;
+            }).join('');
+
+            const descuento = Number(p.descuento) || 0;
+            const sena = Number(p.sena) || 0;
+            const saldo = (p.saldo !== undefined) ? p.saldo : (_pzR2((Number(p.total) || 0) - sena));
+            const condiciones = _pzEsc(String(p.terminos || _PZ_TERMINOS_DEFAULT)).replace(/\n/g, '<br>');
+            const notas = _pzEsc(String(p.notas || '')).replace(/\n/g, '<br>');
+
+            return `<div class="pz-doc">
+                <div class="pz-doc-head">
+                    <div class="pz-doc-brand">
+                        ${t.logo ? `<img src="${t.logo}" alt="Logo">` : ''}
+                        <div>
+                            <div class="pz-doc-negocio">${_pzEsc(t.local || 'TECNITEC')}</div>
+                            <div class="pz-doc-sub">
+                                ${_pzEsc(t.direccion || '')}${t.localidad ? '<br>' + _pzEsc(t.localidad) : ''}
+                                ${t.telefono ? '<br>WhatsApp: ' + _pzEsc(t.telefono) : ''}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="pz-doc-num">
+                        <div class="lbl">Presupuesto</div>
+                        <div class="num">${_pzEsc(p.numero || 'BORRADOR')}</div>
+                        <div class="fecha">
+                            Fecha: ${_pzFechaCorta(p.fecha_creacion)}<br>
+                            Válido hasta: ${_pzFechaCorta(p.fecha_validez)}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pz-doc-info">
+                    <div class="pz-doc-box">
+                        <h4>Cliente</h4>
+                        <p><b>${_pzEsc(p.nombre_completo || 'Cliente')}</b></p>
+                        ${p.celular ? `<p>WhatsApp: ${_pzEsc(p.celular)}</p>` : ''}
+                        ${p.localidad ? `<p>${_pzEsc(p.localidad)}</p>` : ''}
+                        ${p.direccion ? `<p>${_pzEsc(p.direccion)}</p>` : ''}
+                    </div>
+                    <div class="pz-doc-box">
+                        <h4>Equipo</h4>
+                        <p><b>${_pzEsc(eq || 'Equipo no especificado')}</b></p>
+                        <p><b>Falla:</b> ${_pzEsc(p.falla || 'No especificada')}</p>
+                    </div>
+                </div>
+
+                <table class="pz-doc-items">
+                    <thead><tr>
+                        <th class="c" style="width:32px;">#</th>
+                        <th>Descripción</th>
+                        <th class="c" style="width:58px;">Cant.</th>
+                        <th class="r" style="width:90px;">P. unitario</th>
+                        <th class="r" style="width:80px;">Desc.</th>
+                        <th class="r" style="width:100px;">Subtotal</th>
+                    </tr></thead>
+                    <tbody>${filas || '<tr><td colspan="6" class="c">Sin ítems</td></tr>'}</tbody>
+                </table>
+
+                <div class="pz-doc-totales">
+                    <div class="row"><span>Subtotal</span><span>${_pzMoney(p.subtotal)}</span></div>
+                    ${descuento > 0 ? `<div class="row"><span>Descuento</span><span>- ${_pzMoney(descuento)}</span></div>` : ''}
+                    <div class="row gran"><span>TOTAL</span><span>${_pzMoney(p.total)}</span></div>
+                    ${sena > 0 ? `<div class="row"><span>Seña</span><span>${_pzMoney(sena)}</span></div>
+                    <div class="row"><span>Saldo</span><span>${_pzMoney(saldo)}</span></div>` : ''}
+                </div>
+
+                ${notas ? `<div class="pz-doc-cond"><b>Observaciones:</b><br>${notas}</div>` : ''}
+                <div class="pz-doc-cond"><b>Condiciones:</b><br>${condiciones}</div>
+
+                <div class="pz-doc-firmas">
+                    <div class="pz-doc-firma">Firma del cliente</div>
+                    <div class="pz-doc-firma">${_pzEsc(t.local || 'TECNITEC')}</div>
+                </div>
+            </div>`;
+        }
+
+        async function pzImprimir(id) {
+            let p = null;
+            if (id) {
+                try {
+                    const r = await apiFetch(`${API}/presupuestos/${id}`);
+                    const data = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(_pzApiError(data));
+                    p = data;
+                } catch (e) {
+                    showToast('❌ ' + e.message, 'error');
+                    return;
+                }
+            } else {
+                p = _pzPayloadFormulario();
+            }
+
+            const area = document.getElementById('print-area');
+            if (!area) return;
+            area.innerHTML = _pzDocHTML(p);
+            setTimeout(() => {
+                try {
+                    window.print();
+                } finally {
+                    setTimeout(() => { area.innerHTML = ''; }, 700);
+                }
+            }, 80);
+        }
+
+        function pzImprimirActual() {
+            pzImprimir(_pzEditId);
+        }
+
+        // ── WhatsApp ──────────────────────────────────────────────────────
+        function _pzWAText(p) {
+            const t = store.ticket || {};
+            const lineas = [];
+            lineas.push(`🧾 *${t.local || 'TECNITEC'} — PRESUPUESTO ${p.numero || ''}*`);
+            lineas.push('────────────────');
+            lineas.push(`👤 *Cliente:* ${p.nombre_completo || 'Cliente'}`);
+            const eq = [p.tipo_equipo, p.marca, p.modelo].filter(Boolean).join(' ');
+            if (eq) lineas.push(`🔧 *Equipo:* ${eq}`);
+            if (p.falla) lineas.push(`⚠️ *Falla:* ${p.falla}`);
+            lineas.push(`📅 *Válido hasta:* ${_pzFechaCorta(p.fecha_validez)}`);
+            lineas.push('────────────────');
+            lineas.push('🧾 *Detalle:*');
+            (p.items || []).forEach((it, i) => {
+                const cant = Number(it.cantidad) || 1;
+                const sub = (it.subtotal !== undefined) ? it.subtotal : _pzItemSubtotal(it);
+                lineas.push(`${i + 1}. ${it.descripcion}${cant !== 1 ? ' x' + _pzNum(cant) : ''} — ${_pzMoney(sub)}`);
+            });
+            lineas.push('────────────────');
+            lineas.push(`Subtotal: ${_pzMoney(p.subtotal)}`);
+            if (Number(p.descuento) > 0) lineas.push(`Descuento: -${_pzMoney(p.descuento)}`);
+            lineas.push(`*TOTAL: ${_pzMoney(p.total)}*`);
+            if (Number(p.sena) > 0) {
+                lineas.push(`Seña: ${_pzMoney(p.sena)}`);
+                lineas.push(`Saldo: ${_pzMoney(p.saldo)}`);
+            }
+            if (p.notas) lineas.push(`📝 ${p.notas}`);
+            lineas.push('────────────────');
+            lineas.push('Para aprobar este presupuesto, respondé *APROBADO*. ¡Gracias!');
+            return lineas.join('\n');
+        }
+
+        async function _pzEnviarWhatsAppTexto(tel, texto) {
+            try {
+                const resp = await apiFetch(API + '/wa-bot/qr');
+                const status = await resp.json();
+                if (status.iniciando) {
+                    showToast('⏳ Conectando WhatsApp... esperá unos segundos', 'info');
+                    return false;
+                }
+                if (status.need_qr || !status.conectado) {
+                    showToast('📱 Escaneá el QR en Ajustes → Chatbot', 'warning');
+                    return false;
+                }
+                showToast('📩 Enviando presupuesto por WhatsApp...', 'info');
+                const resp2 = await apiFetch(API + '/wa-bot/send-message', {
+                    method: 'POST',
+                    body: JSON.stringify({ telefono: tel, mensaje: texto })
+                });
+                const result = await resp2.json();
+                if (result.ok) {
+                    showToast('✅ Presupuesto enviado por WhatsApp', 'success');
+                    return true;
+                }
+                showToast('❌ ' + (result.error || 'Error al enviar') + (result.codigo ? ' (' + result.codigo + ')' : ''), 'error');
+                return false;
+            } catch (e) {
+                showToast('❌ Error de conexión al enviar WhatsApp', 'error');
+                return false;
+            }
+        }
+
+        async function pzEnviarWA(id) {
+            let p = null;
+            if (id) {
+                try {
+                    const r = await apiFetch(`${API}/presupuestos/${id}`);
+                    const data = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(_pzApiError(data));
+                    p = data;
+                } catch (e) {
+                    showToast('❌ ' + e.message, 'error');
+                    return;
+                }
+            } else {
+                p = _pzPayloadFormulario();
+            }
+
+            const tel = String(p.celular || '').replace(/\D/g, '');
+            if (!tel) {
+                showToast('⚠️ El cliente no tiene un celular registrado.', 'warning');
+                return;
+            }
+            if (!confirm(`¿Enviar el presupuesto ${p.numero || ''} por WhatsApp a ${p.nombre_completo || ''} (${tel})?`)) return;
+
+            const ok = await _pzEnviarWhatsAppTexto(tel, _pzWAText(p));
+            if (ok && id && p.estado === 'borrador') {
+                try {
+                    await apiFetch(`${API}/presupuestos/${id}/estado`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ estado: 'enviado' })
+                    });
+                    showToast('📤 Presupuesto marcado como enviado', 'info');
+                } catch (e) { /* silencioso */ }
+                if (document.getElementById('pz-lista-cont')) pzCargar();
+                pzActualizarBadge();
+            }
+        }
+
+        function pzEnviarWAActual() {
+            pzEnviarWA(_pzEditId);
+        }
+
+        // Cerrar los modales del módulo con Escape (respetando el modal de cliente)
+        document.addEventListener('keydown', function (e) {
+            if (e.key !== 'Escape') return;
+            const cli = document.getElementById('modal-cliente');
+            if (cli && cli.style.display === 'flex') return;
+            const conv = document.getElementById('modal-pz-convertir');
+            const mot = document.getElementById('modal-pz-motivo');
+            const pz = document.getElementById('modal-presupuesto');
+            if (conv && conv.style.display === 'flex') { pzCerrarConvertir(); return; }
+            if (mot && mot.style.display === 'flex') { pzCerrarMotivo(); return; }
+            if (pz && pz.style.display === 'flex') { pzCerrarEditor(); return; }
+        }, true);
+
+
     </script>
     </div> <!-- Cierre de app-container -->
 
@@ -9202,6 +11323,176 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                     style="flex: 1; background: var(--accent); border: none; border-radius: 12px; color: var(--text); padding: 12px; cursor: pointer; font-weight: bold;">
                     Cancelar
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════
+     MODAL PRESUPUESTO — Cotizador
+══════════════════════════════════════════════════════ -->
+    <div id="modal-presupuesto" class="modal">
+        <div class="modal-content pz-modal-content">
+            <div class="pz-modal-head">
+                <div>
+                    <h3 id="pz-modal-title">💰 Nuevo presupuesto</h3>
+                    <p id="pz-modal-sub">Completá los datos del cliente y los ítems de la cotización.</p>
+                </div>
+                <button class="pz-close" onclick="pzCerrarEditor()" title="Cerrar">✕</button>
+            </div>
+
+            <div class="pz-editor-grid">
+                <!-- Columna izquierda: datos -->
+                <div class="pz-col">
+                    <div class="pz-section">
+                        <div class="pz-section-title">👤 Cliente</div>
+                        <div class="pz-input-row">
+                            <input list="dl-cl" id="pz-cliente" placeholder="Buscar o escribir cliente..." oninput="pzVerCl(this.value)">
+                            <button type="button" class="pz-btn-ghost" id="pz-btn-nuevo-cliente" onclick="prepararNuevoCliente()">+ Nuevo</button>
+                        </div>
+                        <div id="pz-cliente-hint" class="pz-hint">Buscá un cliente existente o creá uno nuevo.</div>
+                    </div>
+
+                    <div class="pz-section">
+                        <div class="pz-section-title">🔧 Equipo</div>
+                        <div class="pz-grid-3">
+                            <div>
+                                <span class="pz-label">Tipo *</span>
+                                <input id="pz-tipo" list="dl-tipo" placeholder="Notebook...">
+                            </div>
+                            <div>
+                                <span class="pz-label">Marca</span>
+                                <input id="pz-marca" placeholder="HP...">
+                            </div>
+                            <div>
+                                <span class="pz-label">Modelo</span>
+                                <input id="pz-modelo" placeholder="Pavilion...">
+                            </div>
+                        </div>
+                        <span class="pz-label">Falla reportada *</span>
+                        <textarea id="pz-falla" rows="2" placeholder="Descripción del problema..."></textarea>
+                    </div>
+
+                    <div class="pz-section">
+                        <div class="pz-section-title">📋 Condiciones</div>
+                        <div class="pz-grid-2">
+                            <div>
+                                <span class="pz-label">Válido hasta</span>
+                                <input type="date" id="pz-validez">
+                            </div>
+                            <div>
+                                <span class="pz-label">Seña estimada</span>
+                                <input type="number" id="pz-sena" step="0.01" min="0" value="0" oninput="pzRecalcular()">
+                            </div>
+                        </div>
+                        <span class="pz-label">Notas / observaciones</span>
+                        <textarea id="pz-notas" rows="2" placeholder="Observaciones para el cliente..."></textarea>
+                        <span class="pz-label">Términos y condiciones</span>
+                        <textarea id="pz-terminos" rows="3"></textarea>
+                    </div>
+                </div>
+
+                <!-- Columna derecha: ítems y totales -->
+                <div class="pz-col">
+                    <div class="pz-section">
+                        <div class="pz-items-head">
+                            <div class="pz-section-title">🧾 Ítems del presupuesto</div>
+                            <button type="button" class="pz-btn-ghost" id="pz-btn-add-item" onclick="pzAgregarItem()">+ Ítem manual</button>
+                        </div>
+
+                        <div class="pz-part-search" id="pz-part-search">
+                            <input id="pz-part-buscar" placeholder="🔍 Agregar repuesto desde Partes..." autocomplete="off" oninput="pzBuscarPartes(this.value)" onfocus="pzBuscarPartes(this.value)">
+                            <div id="pz-part-resultados" class="pz-part-resultados"></div>
+                        </div>
+
+                        <div class="pz-items-table">
+                            <div class="pz-item-head">
+                                <span>Tipo</span>
+                                <span>Descripción</span>
+                                <span>Cant.</span>
+                                <span>P. unit.</span>
+                                <span>Desc.</span>
+                                <span>Subtotal</span>
+                                <span></span>
+                            </div>
+                            <div id="pz-items-body"></div>
+                        </div>
+
+                        <div class="pz-totales">
+                            <div class="pz-total-line">
+                                <span>Subtotal</span>
+                                <span id="pz-subtotal">$ 0,00</span>
+                            </div>
+                            <div class="pz-total-line">
+                                <span>Descuento global</span>
+                                <input type="number" id="pz-descuento" step="0.01" min="0" value="0" oninput="pzRecalcular()">
+                            </div>
+                            <div class="pz-total-line pz-total-final">
+                                <span>TOTAL</span>
+                                <span id="pz-total">$ 0,00</span>
+                            </div>
+                            <div class="pz-total-line">
+                                <span>Saldo con seña</span>
+                                <span id="pz-saldo">$ 0,00</span>
+                            </div>
+                        </div>
+
+                        <div id="pz-alerta" class="pz-alerta" style="display:none;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pz-modal-foot">
+                <div class="pz-foot-group">
+                    <button type="button" class="pz-btn pz-btn-secondary" id="pz-btn-print" onclick="pzImprimirActual()">🖨️ Imprimir / PDF</button>
+                    <button type="button" class="pz-btn pz-btn-secondary" id="pz-btn-wa" onclick="pzEnviarWAActual()">📲 WhatsApp</button>
+                </div>
+                <div class="pz-foot-group">
+                    <button type="button" class="pz-btn pz-btn-secondary" onclick="pzCerrarEditor()">Cancelar</button>
+                    <button type="button" class="pz-btn pz-btn-secondary" id="pz-btn-guardar" onclick="pzGuardar(false)">💾 Guardar borrador</button>
+                    <button type="button" class="pz-btn pz-btn-success" id="pz-btn-enviar" onclick="pzGuardar(true)">✅ Guardar y marcar enviado</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════
+     MODAL CONVERTIR PRESUPUESTO EN ORDEN
+══════════════════════════════════════════════════════ -->
+    <div id="modal-pz-convertir" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3 style="color: var(--primary); margin-bottom: 16px;">🔧 Convertir en orden de servicio</h3>
+            <div id="pz-conv-resumen" class="pz-conv-resumen"></div>
+            <span class="info-label">Estado inicial de la orden</span>
+            <select id="pz-conv-estado">
+                <option value="Pendiente">Pendiente</option>
+                <option value="En diagnóstico">En diagnóstico</option>
+                <option value="Presupuesto enviado">Presupuesto enviado</option>
+                <option value="Esperando aprobación">Esperando aprobación</option>
+                <option value="En reparación" selected>En reparación</option>
+                <option value="Esperando repuestos">Esperando repuestos</option>
+                <option value="Listo">Listo</option>
+            </select>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button class="pz-btn pz-btn-secondary" style="flex:1;" onclick="pzCerrarConvertir()">Cancelar</button>
+                <button class="pz-btn pz-btn-success" style="flex:1;" onclick="pzConfirmarConversion()">🔧 Crear orden</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════
+     MODAL MOTIVO DE RECHAZO
+══════════════════════════════════════════════════════ -->
+    <div id="modal-pz-motivo" class="modal">
+        <div class="modal-content" style="max-width: 460px;">
+            <h3 style="color: var(--primary); margin-bottom: 8px;">❌ Rechazar presupuesto</h3>
+            <p style="color: var(--text-muted); font-size: .82rem; margin-top: 0;">Podés registrar el motivo del rechazo para tenerlo en cuenta a futuro.</p>
+            <div class="pz-motivo-box" style="padding: 0;">
+                <span class="info-label">Motivo (opcional)</span>
+                <textarea id="pz-motivo-texto" placeholder="Ej: el cliente decidió no reparar..."></textarea>
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 18px;">
+                <button class="pz-btn pz-btn-secondary" style="flex:1;" onclick="pzCerrarMotivo()">Cancelar</button>
+                <button class="pz-btn pz-btn-danger" style="flex:1;" onclick="pzConfirmarRechazo()">Marcar rechazado</button>
             </div>
         </div>
     </div>
@@ -9552,8 +11843,9 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             // Sincronizar con main process si está disponible
             if (window.require) {
                 try {
-                    var { ipcRenderer } = window.require('electron');
-                    await ipcRenderer.invoke('red:guardar', cfg);
+                    if (window.electronAPI) {
+                        await window.electronAPI.invoke('red:guardar', cfg);
+                    }
                 } catch (e) { }
             }
 
@@ -9569,8 +11861,9 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             try {
                 var info = null;
                 if (window.require) {
-                    var { ipcRenderer } = window.require('electron');
-                    info = await ipcRenderer.invoke('licencia:info');
+                    if (window.electronAPI) {
+                        info = await window.electronAPI.invoke('licencia:info');
+                    }
                 }
                 if (!info) {
                     // Fallback: intentar leer del log parseado o mostrar genérico
@@ -10579,8 +12872,11 @@ document.querySelectorAll('.message-in').forEach(function(el){
     if(id)processed.add(id);
   }
 });
-setInterval(scan,3000);
-var obs=new MutationObserver(scan);
+var _scanTimer = null;
+var obs=new MutationObserver(function(){
+  if(_scanTimer) clearTimeout(_scanTimer);
+  _scanTimer=setTimeout(scan,500);
+});
 if(document.body)obs.observe(document.body,{childList:true,subtree:true});
 window.__wvSendReply=function(text){
   var inp=document.querySelector('div[contenteditable="true"]');
