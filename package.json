@@ -52,12 +52,12 @@
     "files": [
       "main.js",
       "server.js",
+      "preload.js",
       "index.html",
       "license.js",
       "backup.service.js",
       "package.json",
       "logo.png",
-      "!node_modules/**/*",
       "!dist/**",
       "!logs/**",
       "!backups/**",
