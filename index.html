@@ -9372,9 +9372,37 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                 if (cont) cont.innerHTML = '<img src="' + data.qr + '" style="width:220px;height:220px;border-radius:8px;" />';
                 popup.style.display = 'block';
                 if (badge) { badge.className = 'cfg-status-indicator'; badge.style.color = '#eab308'; badge.style.background = 'rgba(234,179,8,0.15)'; badge.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:#eab308;display:inline-block;"></span> ESCANEAR QR'; }
+            } else if (data.error) {
+                if (popup) { popup.style.display = 'none'; popup.remove(); }
+                if (badge) { badge.className = 'cfg-status-indicator'; badge.style.color = '#ef4444'; badge.style.background = 'rgba(239,68,68,0.15)'; badge.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block;"></span> ERROR DEL BOT'; }
+                var errBox = document.getElementById('bot-error-box');
+                if (!errBox) {
+                    errBox = document.createElement('div');
+                    errBox.id = 'bot-error-box';
+                    errBox.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:99999;max-width:430px;padding:14px 16px;background:#1e293b;border:1px solid #7f1d1d;border-left:4px solid #ef4444;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.45);font-size:.78rem;';
+                    document.body.appendChild(errBox);
+                }
+                errBox.innerHTML = '<div style="font-weight:700;color:#f87171;margin-bottom:6px;">⚠️ El chatbot no pudo conectar</div>'
+                    + '<div style="color:#cbd5e1;word-break:break-word;">' + String(data.error).replace(/</g, '&lt;') + '</div>'
+                    + '<div style="margin-top:10px;display:flex;gap:8px;">'
+                    + '<button onclick="reintentarBotWA()" style="background:#ef4444;border:none;color:white;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:.75rem;">Reintentar</button>'
+                    + '<button onclick="cerrarAvisoBotWA()" style="background:#334155;border:none;color:#cbd5e1;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:.75rem;">Cerrar</button>'
+                    + '</div>';
             } else {
                 if (badge) { badge.className = 'cfg-status-indicator'; badge.style.color = '#3b82f6'; badge.style.background = 'rgba(63,131,246,0.15)'; badge.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:#3b82f6;display:inline-block;"></span> CONECTANDO...'; }
             }
+        }
+
+        function reintentarBotWA() {
+            cerrarAvisoBotWA();
+            apiFetch(`${API}/wa-bot/connect`, { method: 'POST' })
+                .then(() => showToast('🔄 Reintentando conectar el chatbot…', 'info'))
+                .catch(() => {});
+        }
+
+        function cerrarAvisoBotWA() {
+            var e = document.getElementById('bot-error-box');
+            if (e) e.remove();
         }
 
         // ── Consultas ─────────────────────────────────────────────────────────────────

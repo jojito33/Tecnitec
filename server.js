@@ -2789,6 +2789,51 @@ let waClient = null;
 let waQR = null;
 let waQRImage = null;
 let _waIniciando = false;
+let _waError = null;
+let _waReintentos = 0;
+let _waTimerReintento = null;
+
+// Reintentos del bot: con espera creciente y con tope, para no quedar en un
+// bucle infinito de "abre Chrome / cierra Chrome" cuando la sesión es inválida.
+const WA_MAX_REINTENTOS = 5;
+const WA_SESION_DIR = path.join(DATA_DIR, 'wa-session');
+
+async function _waDestruirCliente() {
+    const c = waClient;
+    waClient = null;
+    if (!c) return;
+    try { await c.destroy(); } catch (_) {}
+}
+
+function _waPurgarSesion() {
+    try {
+        fs.rmSync(WA_SESION_DIR, { recursive: true, force: true });
+        logger.warn('[WA Bot] Sesión inválida: se borró wa-session (habrá que escanear el QR otra vez).');
+    } catch (e) {
+        logger.warn('[WA Bot] No se pudo borrar la sesión: ' + e.message);
+    }
+}
+
+function _waProgramarReintento(motivo) {
+    _waError = String(motivo || 'error desconocido');
+    if (_waTimerReintento) return; // ya hay uno agendado
+
+    if (_waReintentos >= WA_MAX_REINTENTOS) {
+        _waIniciando = false;
+        logger.error('[WA Bot] Se agotaron los reintentos (' + WA_MAX_REINTENTOS + '). Último motivo: ' + _waError);
+        logger.error('[WA Bot] Abrí Ajustes → Chatbot y tocá "Reintentar" para volver a intentar.');
+        return;
+    }
+
+    _waReintentos++;
+    const espera = Math.min(30000 * Math.pow(2, _waReintentos - 1), 300000); // 30s..5min
+    logger.warn('[WA Bot] Reintento ' + _waReintentos + '/' + WA_MAX_REINTENTOS + ' en ' + Math.round(espera / 1000) + 's — motivo: ' + _waError);
+    _waTimerReintento = setTimeout(() => {
+        _waTimerReintento = null;
+        _waIniciando = false;
+        _iniciarWABot();
+    }, espera);
+}
 
 async function _iniciarWABot() {
     if (_waIniciando) return;
@@ -2796,8 +2841,10 @@ async function _iniciarWABot() {
     try {
         const { Client } = require('whatsapp-web.js');
         const { mkdirSync } = require('fs');
-        const sesionDir = path.join(DATA_DIR, 'wa-session');
+        const sesionDir = WA_SESION_DIR;
         if (!fs.existsSync(sesionDir)) mkdirSync(sesionDir, { recursive: true });
+        // Nunca dejar un Chrome viejo vivo: si quedó uno, se cierra antes de abrir otro.
+        await _waDestruirCliente();
         const puppeteer = require('puppeteer-core');
 
         // Determinar ruta de Chrome - varias posibilidades
@@ -2843,6 +2890,8 @@ async function _iniciarWABot() {
         waClient.on('ready', () => {
             waQR = null;
             waQRImage = null;
+            _waReintentos = 0;
+            _waError = null;
             logger.info('[WA Bot] Conectado!');
             try { db.prepare(`UPDATE whatsapp_sesion SET estado='LISTO', conectado_en=datetime('now'), ultima_actividad=datetime('now') WHERE id=1`).run(); } catch(_) {}
             broadcastWS('wa_status', { estado: 'LISTO', conectado: true });
@@ -2879,26 +2928,36 @@ async function _iniciarWABot() {
                 logger.warn('[WA Bot] Error procesando mensaje: ' + e.message);
             }
         });
-        waClient.on('disconnected', (reason) => {
+        waClient.on('disconnected', async (reason) => {
             logger.warn('[WA Bot] Desconectado: ' + reason);
             try { db.prepare(`UPDATE whatsapp_sesion SET estado='DESCONECTADO' WHERE id=1`).run(); } catch(_) {}
             broadcastWS('wa_status', { estado: 'DESCONECTADO', conectado: false });
-            waClient = null;
-            // Reintentar después de 30s
-            setTimeout(() => { _waIniciando = false; _iniciarWABot(); }, 30000);
+
+            const motivo = String(reason || '');
+            // Sesión cerrada desde el teléfono: hay que borrarla para poder escanear un QR nuevo.
+            const sesionInvalida = /LOGOUT|UNPAIRED/i.test(motivo);
+            await _waDestruirCliente();
+            if (sesionInvalida) _waPurgarSesion();
+            _waProgramarReintento('desconectado: ' + (motivo || 'sin motivo'));
         });
         await waClient.initialize();
     } catch(e) {
         logger.warn('[WA Bot] Error al iniciar: ' + e.message);
-        _waIniciando = false;
-        // Reintentar después de 60s
-        setTimeout(_iniciarWABot, 60000);
+        await _waDestruirCliente();
+        _waProgramarReintento('error al iniciar: ' + e.message);
     }
 }
 
 // Endpoints para el bot
 app.get('/api/wa-bot/qr', (req, res) => {
-    res.json({ qr: waQRImage || null, conectado: waQR === null && waClient !== null, need_qr: waQR !== null && waClient !== null, iniciando: waClient === null });
+    res.json({
+        qr: waQRImage || null,
+        conectado: waQR === null && waClient !== null,
+        need_qr: waQR !== null && waClient !== null,
+        iniciando: waClient === null,
+        error: _waError,
+        reintentos: _waReintentos
+    });
 });
 app.post('/api/wa-bot/disconnect', async (req, res) => {
     try {
@@ -2912,6 +2971,11 @@ app.post('/api/wa-bot/disconnect', async (req, res) => {
 });
 app.post('/api/wa-bot/connect', async (req, res) => {
     if (waClient) return res.json({ ok: true, conectado: true });
+    // Reconexión manual: se cancela la espera pendiente y se resetea el contador
+    if (_waTimerReintento) { clearTimeout(_waTimerReintento); _waTimerReintento = null; }
+    _waReintentos = 0;
+    _waError = null;
+    _waIniciando = false;
     _iniciarWABot();
     res.json({ ok: true });
 });

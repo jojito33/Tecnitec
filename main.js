@@ -92,34 +92,7 @@ function createWindow() {
 
     // Iniciar servidor en segundo plano (no bloquea UI)
     if (!esModoCliente()) {
-        const serverJS = path.join(__dirname, 'server.js');
-        writeLog('Iniciando servidor Express en proceso hijo');
-        serverProcess = require('child_process').fork(serverJS, [], {
-            silent: true,
-            env: { ...process.env, TECNITEC_DATA_DIR: _dataDir, TECNITEC_PORT: '3000' }
-        });
-        serverProcess.stdout.on('data', d => { try { String(d).trim().split('\n').forEach(l => writeLog('[SERVER] ' + l)); } catch(e) {} });
-        serverProcess.stderr.on('data', d => { try { String(d).trim().split('\n').forEach(l => writeLog('[SERVER ERR] ' + l)); } catch(e) {} });
-        serverProcess.on('error', e => writeLog('[ERROR] Servidor: ' + e.message));
-
-        // Watchdog simple: si falla, intentamos reiniciar una vez
-        let reintentos = 0;
-        serverProcess.on('exit', (code, signal) => {
-            writeLog(`Servidor terminó: código=${code} señal=${signal}`);
-            if (_appQuitting) return;
-            if (reintentos < 1) {
-                reintentos++;
-                setTimeout(() => {
-                    writeLog('Reiniciando servidor...');
-                    const nuevo = require('child_process').fork(serverJS, [], {
-                        silent: true, env: { ...process.env, TECNITEC_DATA_DIR: _dataDir, TECNITEC_PORT: '3000' }
-                    });
-                    nuevo.stdout.on('data', d => { try { String(d).trim().split('\n').forEach(l => writeLog('[SERVER] ' + l)); } catch(e) {} });
-                    nuevo.on('exit', (c, s) => writeLog(`Servidor reiniciado terminó: ${c}/${s}`));
-                    serverProcess = nuevo;
-                }, 3000);
-            }
-        });
+        lanzarServidor(path.join(__dirname, 'server.js'));
     }
 
     // Cerrar el splash cuando la ventana principal ya puede mostrarse,
@@ -137,6 +110,84 @@ function createWindow() {
 // ─── Modo cliente
 function esModoCliente() {
     try { return require('fs').existsSync(path.join(__dirname, 'tecnitec_red.json')); } catch(e) { return false; }
+}
+
+// ─── Servidor interno: arranque con reintentos y aviso visible si no levanta
+// Antes reintentaba en silencio: en el compilado el servidor moría al instante y
+// la app quedaba abriéndose/cerrándose sin explicar por qué.
+const MAX_REINTENTOS_SERVIDOR = 3;
+let _reintentosServidor = 0;
+let _salidaServidor = [];
+let _avisoServidorMostrado = false;
+
+function _guardarSalidaServidor(d) {
+    String(d).split('\n').forEach(l => {
+        const t = l.trim();
+        if (!t) return;
+        _salidaServidor.push(t);
+        if (_salidaServidor.length > 30) _salidaServidor.shift();
+    });
+}
+
+function _avisarServidorCaido() {
+    if (_avisoServidorMostrado) return;
+    _avisoServidorMostrado = true;
+
+    const detalle = _salidaServidor.slice(-10).join('\n') || 'El proceso del servidor terminó sin mensajes.';
+    let rutaLog = '';
+    try {
+        const dirLogs = path.join(_dataDir, 'logs');
+        require('fs').mkdirSync(dirLogs, { recursive: true });
+        rutaLog = path.join(dirLogs, 'servidor-error.log');
+        require('fs').writeFileSync(rutaLog, '[' + new Date().toISOString() + ']\n' + _salidaServidor.join('\n') + '\n');
+    } catch (_) { rutaLog = ''; }
+
+    writeLog('[ERROR] El servidor no pudo iniciar: ' + detalle.split('\n').pop());
+    try {
+        dialog.showErrorBox(
+            'El servidor interno no pudo iniciar',
+            'La ventana abrió, pero el servidor de TECNITEC se cerró ' + (MAX_REINTENTOS_SERVIDOR + 1) + ' veces.\n\n' +
+            'Detalle:\n' + detalle +
+            (rutaLog ? '\n\nSe guardó en:\n' + rutaLog : '')
+        );
+    } catch (_) {}
+}
+
+function lanzarServidor(serverJS) {
+    writeLog('Iniciando servidor Express en proceso hijo' +
+        (_reintentosServidor ? ' (reintento ' + _reintentosServidor + '/' + MAX_REINTENTOS_SERVIDOR + ')' : ''));
+
+    const proc = require('child_process').fork(serverJS, [], {
+        silent: true,
+        env: { ...process.env, TECNITEC_DATA_DIR: _dataDir, TECNITEC_PORT: '3000' }
+    });
+    serverProcess = proc;
+
+    proc.stdout.on('data', d => { try { String(d).trim().split('\n').forEach(l => writeLog('[SERVER] ' + l)); } catch (e) {} });
+    proc.stderr.on('data', d => {
+        try {
+            _guardarSalidaServidor(d);
+            String(d).trim().split('\n').forEach(l => writeLog('[SERVER ERR] ' + l));
+        } catch (e) {}
+    });
+    proc.on('error', e => {
+        writeLog('[ERROR] Servidor: ' + e.message);
+        _guardarSalidaServidor('spawn: ' + e.message);
+    });
+
+    proc.on('exit', (code, signal) => {
+        writeLog(`Servidor terminó: código=${code} señal=${signal}`);
+        if (_appQuitting) return;
+
+        if (_reintentosServidor < MAX_REINTENTOS_SERVIDOR) {
+            const espera = 3000 * Math.pow(2, _reintentosServidor); // 3s, 6s, 12s
+            _reintentosServidor++;
+            writeLog('Reintentando servidor en ' + (espera / 1000) + 's...');
+            setTimeout(() => { if (!_appQuitting) lanzarServidor(serverJS); }, espera);
+        } else {
+            _avisarServidorCaido();
+        }
+    });
 }
 
 // ─── Cierre ordenado del servidor hijo
