@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const path = require('path');
 
 // Write version marker so we know this build is running
@@ -50,53 +50,34 @@ let _fantasmaHash = null;
 
 // ─── Crear ventana principal
 function createWindow() {
-    // Splash screen
-    const splashMinMs = 1500;
-    const splashShownAt = Date.now();
+    // ── Splash de inicio (splash.html + splash.jpg, se empaquetan con la app)
+    const splashMinMs = 2600;   // tiempo mínimo en pantalla: deja ver la animación
+    const splashMaxMs = 10000;  // si la ventana nunca avisa que está lista, igual se cierra
+    let splashCerrado = false;
 
     const splashWindow = new BrowserWindow({
-        width: 520, height: 340, frame: false, transparent: true,
-        resizable: false, movable: true, skipTaskbar: true, alwaysOnTop: true,
+        width: 820, height: 470, show: false,
+        frame: false, transparent: true,
         backgroundColor: '#00000000',
+        resizable: false, movable: true, skipTaskbar: true, alwaysOnTop: true,
         webPreferences: { nodeIntegration: false, contextIsolation: true }
     });
 
-    splashWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`
-        <!DOCTYPE html><html><head><meta charset="utf-8">
-        <style>
-            * { margin:0; padding:0; box-sizing:border-box; }
-            html,body { width:100%; height:100%; overflow:hidden; }
-            .splash {
-                width:100%; height:100%;
-                background: linear-gradient(145deg, #0d1421 0%, #111827 40%, #0f172a 100%);
-                border-radius: 20px; border: 1px solid rgba(99,102,241,0.25);
-                box-shadow: 0 32px 80px rgba(0,0,0,0.8);
-                display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px;
-                position: relative; overflow: hidden; -webkit-app-region: drag;
-            }
-            .logo-wrap { width:140px; height:140px; display: flex; align-items: center; justify-content: center; }
-            .logo-img { width:130px; height:130px; object-fit: contain; filter: drop-shadow(0 0 20px rgba(99,102,241,0.45)); }
-            .brand { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-            .brand-name { font-size: 26px; font-weight: 800; letter-spacing: 4px; text-transform: uppercase;
-                background: linear-gradient(135deg, #e2e8f0 0%, #94a3b8 50%, #6366f1 100%);
-                -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-            .brand-sub { font-size: 10px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; color: rgba(148,163,184,0.6); }
-            .progress-wrap { width:200px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
-            .progress-track { width:100%; height:3px; background: rgba(255,255,255,0.06); border-radius: 10px; overflow: hidden; }
-            .progress-fill { height:100%; width:0%; border-radius: 10px; background: linear-gradient(90deg, #6366f1, #818cf8, #6366f1); }
-            .status-text { font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: rgba(148,163,184,0.45); }
-            @keyframes progress-load { 0%   { width: 0%; } 10%  { width: 15%; } 30%  { width: 40%; } 60%  { width: 70%; } 85%  { width: 88%; } 100% { width: 100%; } }
-            @keyframes shimmer { 0%   { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-            .version-tag { position: absolute; bottom: 16px; right: 20px; font-family: 'Courier New', monospace; font-size: 9px; letter-spacing: 1px; color: rgba(99,102,241,0.35); }
-        </style>
-        <body>
-        <div class="splash">
-            <div class="logo-wrap"><div class="logo-ring"></div><div class="logo-ring-2"></div><img class="logo-img" alt="Tecnitec"></div>
-            <div class="brand"><div class="brand-name">Tecnitec</div><div class="brand-sub">Sistema de Gestión</div></div>
-            <div class="progress-wrap"><div class="progress-track"><div class="progress-fill"></div></div><div class="status-text">Iniciando sistema...</div></div>
-            <div class="version-tag">v31.82</div>
-        </div></body></html>
-    `));
+    splashWindow.loadFile(path.join(__dirname, 'splash.html'), { query: { v: app.getVersion() } });
+    splashWindow.once('ready-to-show', () => { try { splashWindow.show(); } catch (_) {} });
+    splashWindow.webContents.on('did-fail-load', (_e, code, desc) => {
+        writeLog('Splash no pudo cargar: ' + code + ' ' + desc);
+    });
+
+    const splashMostradoEn = Date.now();
+
+    function cerrarSplash() {
+        if (splashCerrado) return;
+        splashCerrado = true;
+        try { if (!splashWindow.isDestroyed()) splashWindow.close(); } catch (_) {}
+        try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show(); } catch (_) {}
+        writeLog('Splash cerrado, ventana principal visible');
+    }
 
     // Crear ventana principal OCULTA
     mainWindow = new BrowserWindow({
@@ -141,17 +122,16 @@ function createWindow() {
         });
     }
 
-    // Cerrar splash y mostrar ventana principal después de un máximo de 10s
-    setTimeout(() => {
-        try { if (!splashWindow.isDestroyed()) splashWindow.close(); } catch(e) {}
-        try { mainWindow.show(); } catch(e) {}
-        writeLog('Splash cerrado, ventana principal visible');
-    }, 10000);
-
-    // Cuando la ventana esté lista, también cerrar splash
+    // Cerrar el splash cuando la ventana principal ya puede mostrarse,
+    // respetando un mínimo para que la animación se vea.
     mainWindow.once('ready-to-show', () => {
         writeLog('Ventana lista para mostrar');
+        const restante = Math.max(0, splashMinMs - (Date.now() - splashMostradoEn));
+        setTimeout(cerrarSplash, restante);
     });
+
+    // Red de seguridad: nunca dejar el splash colgado
+    setTimeout(cerrarSplash, splashMaxMs);
 }
 
 // ─── Modo cliente
@@ -199,6 +179,8 @@ process.on('exit', () => {
 // ─── Ciclo de vida
 if (_instanciaUnica) {
     app.whenReady().then(() => {
+        // Sin menú superior (File, Edit, View, Window, Help...)
+        try { Menu.setApplicationMenu(null); } catch (_) {}
         writeLog('App lista, creando ventana...');
         createWindow();
     });

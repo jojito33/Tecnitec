@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>TECNITEC CORE</title>
+<style>
+  :root {
+    --ink:        #e8edf5;
+    --muted:      #8b98ab;
+    --dim:        #5b6a80;
+    --red:        #f43f5e;
+    --red-deep:   #b91c3c;
+    --card-from:  #0d1420;
+    --card-mid:   #0f1724;
+    --card-to:    #090e16;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: transparent;
+    overflow: hidden;
+    font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    cursor: default;
+  }
+
+  body { display: flex; align-items: center; justify-content: center; padding: 20px; }
+
+  /* ─────────────  Tarjeta  ───────────── */
+  .card {
+    position: relative;
+    width: 100%; height: 100%;
+    display: flex;
+    overflow: hidden;
+    border-radius: 20px;
+    background: linear-gradient(155deg, var(--card-from) 0%, var(--card-mid) 46%, var(--card-to) 100%);
+    border: 1px solid rgba(244, 63, 94, 0.16);
+    box-shadow:
+      0 34px 70px -22px rgba(0, 0, 0, 0.9),
+      0 0 0 1px rgba(255, 255, 255, 0.035) inset,
+      0 0 70px -34px rgba(244, 63, 94, 0.55);
+    -webkit-app-region: drag;
+    animation: cardIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes cardIn {
+    from { opacity: 0; transform: scale(0.982) translateY(6px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /* ─────────────  Panel de arte  ───────────── */
+  .art {
+    position: relative;
+    flex: 0 0 42%;
+    overflow: hidden;
+    background: radial-gradient(120% 90% at 50% 40%, #1a0d12 0%, #0a0e15 70%);
+  }
+  .art img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    object-position: 50% 42%;
+    transform: scale(1.02);
+    animation: artIn 1.15s ease-out both;
+  }
+  @keyframes artIn {
+    from { opacity: 0.15; transform: scale(1.09); }
+    to   { opacity: 1;    transform: scale(1.02); }
+  }
+  /* fundido del arte hacia el resto de la tarjeta (sin bordes visibles) */
+  .art::after {
+    content: "";
+    position: absolute; inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(90deg,
+        #0a0e15 0%,
+        rgba(10, 14, 21, 0.72) 5%,
+        rgba(10, 14, 21, 0.18) 16%,
+        rgba(10, 14, 21, 0.00) 34%,
+        rgba(10, 14, 21, 0.00) 56%,
+        rgba(13, 20, 32, 0.62) 82%,
+        var(--card-mid) 100%),
+      linear-gradient(180deg,
+        #0a0e15 0%,
+        rgba(10, 14, 21, 0.55) 6%,
+        rgba(10, 14, 21, 0.00) 20%,
+        rgba(10, 14, 21, 0.00) 74%,
+        rgba(9, 14, 22, 0.55) 92%,
+        #090e16 100%);
+  }
+
+  /* ─────────────  Contenido  ───────────── */
+  .content {
+    position: relative;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 34px 42px 58px;
+  }
+  .content::before {
+    content: "";
+    position: absolute;
+    width: 360px; height: 220px;
+    right: -60px; top: 46%;
+    transform: translateY(-50%);
+    background: radial-gradient(closest-side, rgba(244, 63, 94, 0.10), transparent 72%);
+    pointer-events: none;
+  }
+
+  .kicker {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 10px; font-weight: 600;
+    letter-spacing: 0.30em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .kicker::before {
+    content: "";
+    width: 26px; height: 2px; border-radius: 2px;
+    background: linear-gradient(90deg, var(--red-deep), var(--red));
+    box-shadow: 0 0 10px rgba(244, 63, 94, 0.55);
+  }
+
+  .brand {
+    margin-top: 14px;
+    font-size: 35px;
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: 0.185em;
+    text-transform: uppercase;
+    background: linear-gradient(180deg, #ffffff 0%, #d3dcea 58%, #8d9bb0 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 2px 12px rgba(0, 0, 0, 0.55));
+  }
+
+  .sub {
+    margin-top: 10px;
+    font-size: 11.5px;
+    letter-spacing: 0.11em;
+    color: var(--dim);
+  }
+
+  /* ─────────────  Progreso  ───────────── */
+  .progress { margin-top: 34px; }
+
+  .progress-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 11px;
+  }
+  .status {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11.5px;
+    letter-spacing: 0.055em;
+    color: var(--muted);
+  }
+  .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--red);
+    box-shadow: 0 0 9px rgba(244, 63, 94, 0.9);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.40; transform: scale(0.82); }
+    50%      { opacity: 1.00; transform: scale(1); }
+  }
+  .pct {
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    color: var(--dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .track {
+    position: relative;
+    height: 3px;
+    border-radius: 99px;
+    background: rgba(255, 255, 255, 0.065);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+    overflow: hidden;
+  }
+  .fill {
+    position: relative;
+    height: 100%;
+    width: 0%;
+    border-radius: 99px;
+    background: linear-gradient(90deg, #8f1230 0%, var(--red-deep) 30%, var(--red) 72%, #fb7185 100%);
+    box-shadow: 0 0 14px rgba(244, 63, 94, 0.55);
+  }
+  .fill::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: linear-gradient(100deg,
+      transparent 0%, rgba(255, 255, 255, 0.55) 48%, transparent 100%);
+    transform: translateX(-100%);
+    animation: sheen 1.6s ease-in-out infinite;
+  }
+  @keyframes sheen {
+    0%   { transform: translateX(-100%); }
+    60%  { transform: translateX(100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  /* ─────────────  Pie  ───────────── */
+  .meta {
+    position: absolute;
+    left: 42px; right: 42px; bottom: 22px;
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #46536a;
+  }
+  .meta .ver { color: #5b6a80; letter-spacing: 0.10em; text-transform: none; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="art">
+      <img src="splash.jpg" alt="TECNITEC">
+    </div>
+
+    <div class="content">
+      <div class="kicker">Sistema de Gestión</div>
+      <h1 class="brand">Tecnitec</h1>
+      <p class="sub">Plataforma de gestión comercial</p>
+
+      <div class="progress">
+        <div class="progress-head">
+          <span class="status"><i class="dot"></i><span id="status">Iniciando sistema…</span></span>
+          <span class="pct" id="pct">0%</span>
+        </div>
+        <div class="track"><div class="fill" id="fill"></div></div>
+      </div>
+
+      <div class="meta">
+        <span>TECNITEC CORE</span>
+        <span class="ver">v<span id="ver">—</span></span>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const ver = new URLSearchParams(location.search).get('v');
+  if (ver) document.getElementById('ver').textContent = ver;
+
+  const statusEl = document.getElementById('status');
+  const pctEl    = document.getElementById('pct');
+  const fillEl   = document.getElementById('fill');
+
+  // Etapas reales del arranque (el servidor abre la base y luego WhatsApp).
+  const ETAPAS = [
+    [0,   'Iniciando sistema'],
+    [24,  'Cargando base de datos'],
+    [55,  'Preparando servicios'],
+    [80,  'Conectando WhatsApp'],
+    [100, 'Todo listo']
+  ];
+
+  const DURACION = 2300;                      // ms hasta el 100%
+  const inicio = performance.now();
+  let etapaActual = -1;
+
+  const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+
+  function paso() {
+    const t   = Math.min(1, (performance.now() - inicio) / DURACION);
+    const pct = Math.round(easeOutCubic(t) * 100);
+
+    fillEl.style.width = pct + '%';
+    pctEl.textContent  = pct + '%';
+
+    let idx = 0;
+    for (let i = 0; i < ETAPAS.length; i++) if (pct >= ETAPAS[i][0]) idx = i;
+    if (idx !== etapaActual) {
+      etapaActual = idx;
+      const final = idx === ETAPAS.length - 1;
+      statusEl.textContent = ETAPAS[idx][1] + (final ? '' : '…');
+      statusEl.style.color = final ? '#c7d2e2' : '';
+    }
+
+    if (t >= 1) clearInterval(tick);
+  }
+
+  const tick = setInterval(paso, 16);
+  paso();
+</script>
+</body>
+</html>

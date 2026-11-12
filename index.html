@@ -5094,6 +5094,9 @@ ${(cfg.mensaje_bienvenida || '').replace(/{nombre}/g, 'Juan').replace(/{negocio}
                     <p style="font-size:0.8rem; margin:5px 0" onclick="verOrden('${o.id}')" style="cursor:pointer;">
                         👤 ${nombreCompleto} | <b>Saldo: $${presupuesto - sena}</b>
                     </p>
+                    <p style="font-size:0.75rem; margin:0; color:var(--text-muted);" onclick="verOrden('${o.id}')" title="Fecha y hora en que se tomó el pedido">
+                        📅 Tomado: ${_fmtFechaHora(o.fecha_hora) || '—'}
+                    </p>
                 </div>
                 `;
             }).join('');
@@ -5132,6 +5135,14 @@ ${(cfg.mensaje_bienvenida || '').replace(/{nombre}/g, 'Juan').replace(/{negocio}
 
         function _estadoClass(e) { return 'st-' + e.toLowerCase().replace(/[^a-záéíóúñ0-9]+/g, '_'); }
         function _diasEnTaller(f) { return f ? Math.floor((Date.now() - new Date(f).getTime()) / 86400000) : 0; }
+        // Fecha y hora legibles (dd/mm/aaaa hh:mm) del momento en que se tomó el pedido
+        function _fmtFechaHora(f) {
+            if (!f) return '';
+            const d = new Date(String(f).replace(' ', 'T'));
+            if (isNaN(d.getTime())) return String(f);
+            const p = n => ('0' + n).slice(-2);
+            return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+        }
 
         function renderTallerKanban(filter = '') {
             const f = filter.toLowerCase();
@@ -5166,6 +5177,7 @@ ${(cfg.mensaje_bienvenida || '').replace(/{nombre}/g, 'Juan').replace(/{negocio}
                     const falla = (o.falla || '').replace(/['"\\<>]/g, '');
                     const cel = o.celular || '';
                     const dias = _diasEnTaller(o.fecha_hora);
+                    const fechaTomado = _fmtFechaHora(o.fecha_hora);
                     return `
                         <div class="kanban-card" onclick="verOrden('${o.id}')" style="border-left:4px solid ${color};">
                             <div class="kanban-card-header">
@@ -5175,9 +5187,10 @@ ${(cfg.mensaje_bienvenida || '').replace(/{nombre}/g, 'Juan').replace(/{negocio}
                             <div class="kanban-card-equipo" title="${equipoLabel.replace(/"/g, '&quot;')}">${equipoLabel}</div>
                             <div class="kanban-card-falla">${falla}</div>
                             <div class="kanban-card-saldo" style="color:${color};">Saldo: $${(presupuesto - sena).toLocaleString('es-AR')}</div>
+                            <div style="font-size:.65rem;color:var(--text-muted);margin-top:5px;" title="Fecha y hora en que se tomó el pedido">📅 Tomado: ${fechaTomado || '—'}</div>
                             <div class="kanban-card-footer">
                                 <span>👤 ${(o.nombre_completo || 'Sin nombre').replace(/['"\\<>]/g, '')}</span>
-                                <span>📅 ${dias} día${dias !== 1 ? 's' : ''}</span>
+                                <span title="Días en taller">⏱️ ${dias} día${dias !== 1 ? 's' : ''}</span>
                             </div>
                         </div>`;
                 }).join('')}</div>
@@ -5207,7 +5220,7 @@ ${(cfg.mensaje_bienvenida || '').replace(/{nombre}/g, 'Juan').replace(/{negocio}
             const marcaEquipo = o.marca || '';
             const modeloEquipo = o.modelo || '';
             const equipoLabel = [tipoEquipo, marcaEquipo, modeloEquipo].filter(Boolean).join(' ') || '—';
-            document.getElementById('side-orden').innerHTML = `<div class="card"><h3>Orden #${o.id}</h3><p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:6px;"><b>Equipo:</b> ${equipoLabel}</p><p style="font-size:0.9rem"><b>Falla:</b> ${falla}<br><b>Clave:</b> ${clave}</p><div style="background:rgba(0,0,0,0.2); padding:10px; border-radius:10px; margin-bottom:15px; font-size:0.85rem"><div style="display:flex; justify-content:space-between"><span>Total:</span> <span>$${presupuesto}</span></div><div style="display:flex; justify-content:space-between; color:var(--warning)"><span>Seña:</span> <span>$${sena}</span></div><div style="display:flex; justify-content:space-between; color:var(--success); font-weight:bold; border-top:1px solid var(--accent); margin-top:5px; pt:5px"><span>Saldo:</span> <span>$${presupuesto - sena}</span></div></div><span class="info-label">Estado</span><select id="edit-estado">
+            document.getElementById('side-orden').innerHTML = `<div class="card"><h3>Orden #${o.id}</h3><p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:6px;"><b>Equipo:</b> ${equipoLabel}</p><p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;">📅 <b>Tomado:</b> ${_fmtFechaHora(o.fecha_hora) || '—'}</p><p style="font-size:0.9rem"><b>Falla:</b> ${falla}<br><b>Clave:</b> ${clave}</p><div style="background:rgba(0,0,0,0.2); padding:10px; border-radius:10px; margin-bottom:15px; font-size:0.85rem"><div style="display:flex; justify-content:space-between"><span>Total:</span> <span>$${presupuesto}</span></div><div style="display:flex; justify-content:space-between; color:var(--warning)"><span>Seña:</span> <span>$${sena}</span></div><div style="display:flex; justify-content:space-between; color:var(--success); font-weight:bold; border-top:1px solid var(--accent); margin-top:5px; pt:5px"><span>Saldo:</span> <span>$${presupuesto - sena}</span></div></div><span class="info-label">Estado</span><select id="edit-estado">
 ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación', 'En reparación', 'Esperando repuestos', 'Listo', 'Entregado'].map(s => `<option value="${s}" ${estado === s ? 'selected' : ''}>${s}</option>`).join('')}
 </select><span class="info-label">Notas Técnicas</span><textarea id="edit-notas">${notasTecnicas}</textarea><button onclick="guardarCambiosTaller('${o.id}')" class="nav-btn active" style="text-align:center">GUARDAR</button><button onclick="imprimirTicketOrden('${o.id}')" style="width:100%; margin-top:10px; background:var(--accent); border:none; padding:10px; border-radius:10px; color:white; cursor:pointer">🖨️ REIMPRIMIR</button>
 <button onclick="verHistorialOrden('${o.id}')" style="width:100%; margin-top:6px; background:rgba(99,102,241,.15); border:1px solid #6366f1; padding:8px; border-radius:10px; color:#818cf8; cursor:pointer; font-size:.82rem;">📋 Ver historial de cambios</button>
@@ -5537,6 +5550,13 @@ ${['Pendiente', 'En diagnóstico', 'Presupuesto enviado', 'Esperando aprobación
             if (!validarPresupuestoYSena(presupuesto, sena)) {
                 marcarInputError('o-sena');
                 return;
+            }
+
+            // Marca de tiempo real del momento en que se toma el pedido
+            const _inpFecha = document.getElementById('o-fecha');
+            if (_inpFecha) {
+                const _ahora = new Date();
+                _inpFecha.value = new Date(_ahora.getTime() - (_ahora.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
             }
 
             const o = {
