@@ -4807,6 +4807,8 @@ ${(cfg.mensaje_bienvenida || '').replace(/{nombre}/g, 'Juan').replace(/{negocio}
                     showToast('✅ Configuración del chatbot guardada', 'success');
                     // Actualizar indicador de estado
                     cargarConfigChatbot();
+                    // Si se activó el chatbot, el bot arranca en el servidor: refrescar el QR enseguida
+                    setTimeout(_chequearBotQR, 1500);
                 } else {
                     showToast('❌ Error al guardar', 'error');
                 }

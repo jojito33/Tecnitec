@@ -1945,6 +1945,26 @@ app.post('/api/chatbot/config', ...soloAdmin, async (req, res) => {
     try {
         for (const [clave, valor] of Object.entries(req.body))
             await dbRun("INSERT OR REPLACE INTO chatbot_config (clave, valor) VALUES (?, ?)", [clave, valor !== null && valor !== undefined ? String(valor) : '']);
+
+        // El interruptor "Chatbot activo" arranca o detiene el bot de WhatsApp al instante,
+        // sin esperar a reiniciar la aplicación.
+        if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'chatbot_activo')) {
+            if (String(req.body.chatbot_activo) === '1') {
+                if (!waClient && !_waIniciando) {
+                    _waReintentos = 0;
+                    _waError = null;
+                    logger.info('[WA Bot] Chatbot activado desde Ajustes: iniciando bot...');
+                    _iniciarWABot();
+                }
+            } else {
+                logger.info('[WA Bot] Chatbot desactivado desde Ajustes: cerrando bot...');
+                if (_waTimerReintento) { clearTimeout(_waTimerReintento); _waTimerReintento = null; }
+                _waReintentos = 0;
+                _waError = null;
+                _waDestruirCliente().then(() => { waQR = null; waQRImage = null; }).catch(() => {});
+            }
+        }
+
         res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -3025,13 +3045,22 @@ app.post('/api/wa-bot/send-message', async (req, res) => {
     }
 });
 
-// Iniciar bot solo si está habilitado en configuración (opt-in)
-(async function() {
+// Arranque automático del bot, una vez que las migraciones crearon las tablas.
+// La UI guarda la clave 'chatbot_activo'; 'bot_activo' queda como alias de versiones viejas.
+async function _autoIniciarWABot() {
     try {
-        const cfg = await dbGet("SELECT valor FROM chatbot_config WHERE clave='bot_activo'");
-        if (cfg?.valor === '1') setTimeout(_iniciarWABot, 5000);
-    } catch(_) {}
-})();
+        const rows = await dbAll("SELECT clave, valor FROM chatbot_config WHERE clave IN ('chatbot_activo','bot_activo')");
+        const activo = (rows || []).some(r => String(r.valor) === '1');
+        if (activo) {
+            logger.info('[WA Bot] Chatbot habilitado: iniciando bot...');
+            setTimeout(_iniciarWABot, 5000);
+        } else {
+            logger.info('[WA Bot] Chatbot desactivado en configuración: no se inicia.');
+        }
+    } catch (e) {
+        logger.warn('[WA Bot] No se pudo leer la configuración del chatbot: ' + e.message);
+    }
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 21. INICIO DEL SERVIDOR
@@ -3039,6 +3068,8 @@ app.post('/api/wa-bot/send-message', async (req, res) => {
 correrMigraciones()
     .then(() => {
         migracionLista = true;
+        // Ahora sí existen las tablas: recién acá se puede leer la config del chatbot
+        _autoIniciarWABot();
         // Optimización estadística de SQLite (query planner)
         try { db.pragma('optimize'); logger.info('[DB] PRAGMA optimize ejecutado'); } catch (_) {}
         const httpServer = http.createServer(app);
