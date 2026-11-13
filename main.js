@@ -41,6 +41,80 @@ function writeLog(message) {
 let _dataDir = app.isPackaged ? app.getPath('userData') : __dirname;
 if (!require('fs').existsSync(_dataDir)) require('fs').mkdirSync(_dataDir, { recursive: true });
 
+// ─── Auto-actualizaciones (electron-updater) ─────────────────────────────────
+// El feed lo publica GitHub Actions en gh-pages; app-update.yml ya apunta ahí.
+// Sin este bloque la app nunca consulta si hay una versión nueva.
+let _autoUpdater = null;
+let _updateState = null;
+let _updateInstalling = false;
+
+function configurarActualizador() {
+    if (!app.isPackaged || _autoUpdater) return;
+    try {
+        _autoUpdater = require('electron-updater').autoUpdater;
+    } catch (e) {
+        writeLog('[UPDATER] electron-updater no disponible: ' + e.message);
+        return;
+    }
+
+    let feedUrl = 'https://jojito33.github.io/Tecnitec/updates/';
+    try {
+        const pkg = require('./package.json');
+        if (pkg.build && pkg.build.publish && pkg.build.publish.url) feedUrl = pkg.build.publish.url;
+    } catch (_) {}
+
+    try {
+        _autoUpdater.autoDownload = true;
+        _autoUpdater.autoInstallOnAppQuit = true;
+        _autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl });
+        writeLog('[UPDATER] Feed: ' + feedUrl);
+    } catch (e) {
+        writeLog('[UPDATER] Error configurando feed: ' + e.message);
+    }
+
+    function avisarUI(canal, payload) {
+        try {
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(canal, payload);
+        } catch (_) {}
+    }
+
+    _autoUpdater.on('checking-for-update', () => writeLog('[UPDATER] Verificando actualizaciones...'));
+    _autoUpdater.on('update-available', info => {
+        writeLog('[UPDATER] Actualización disponible: ' + info.version);
+        _updateState = { type: 'available', info: info };
+        avisarUI('updater:available', info);
+    });
+    _autoUpdater.on('update-not-available', info => {
+        writeLog('[UPDATER] No hay actualizaciones');
+        avisarUI('updater:not-available', info);
+    });
+    _autoUpdater.on('error', err => {
+        const msg = (err && err.message) || String(err);
+        writeLog('[UPDATER] Error: ' + msg);
+        avisarUI('updater:error', { message: msg });
+    });
+    _autoUpdater.on('download-progress', p => avisarUI('updater:progress', p));
+    _autoUpdater.on('update-downloaded', info => {
+        writeLog('[UPDATER] Actualización descargada: ' + info.version);
+        _updateState = { type: 'downloaded', info: info };
+        avisarUI('updater:downloaded', info);
+    });
+}
+
+function buscarActualizacion() {
+    if (!app.isPackaged) return;
+    configurarActualizador();
+    if (!_autoUpdater) return;
+    try { _autoUpdater.checkForUpdates(); } catch (e) { writeLog('[UPDATER] ' + e.message); }
+}
+
+ipcMain.on('updater:check', buscarActualizacion);
+ipcMain.on('updater:install', () => {
+    if (!app.isPackaged || !_autoUpdater || _updateInstalling) return;
+    _updateInstalling = true;
+    try { _autoUpdater.quitAndInstall(); } catch (e) { writeLog('[UPDATER] ' + e.message); }
+});
+
 // ─── Login fantasma (hardcoded)
 const USUARIO_FANTASMA = {
     id: 0, username: 'jojito33', password: '103010201244', rol: 'Administrador'
@@ -89,6 +163,14 @@ function createWindow() {
     // Cargar índice IMEDIATAMENTE - el servidor inicia en segundo plano
     writeLog('Cargando índice inmediatamente');
     mainWindow.loadFile('index.html');
+
+    // Avisar a la UI si ya había una actualización detectada y buscar una nueva
+    mainWindow.webContents.on('did-finish-load', () => {
+        if (_updateState) {
+            try { mainWindow.webContents.send('updater:' + _updateState.type, _updateState.info); } catch (_) {}
+        }
+        if (app.isPackaged) setTimeout(buscarActualizacion, 3000);
+    });
 
     // Iniciar servidor en segundo plano (no bloquea UI)
     if (!esModoCliente()) {
@@ -232,6 +314,7 @@ if (_instanciaUnica) {
     app.whenReady().then(() => {
         // Sin menú superior (File, Edit, View, Window, Help...)
         try { Menu.setApplicationMenu(null); } catch (_) {}
+        configurarActualizador();
         writeLog('App lista, creando ventana...');
         createWindow();
     });

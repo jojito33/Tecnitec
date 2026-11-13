@@ -11984,8 +11984,9 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
         // SISTEMA DE AUTO-UPDATE — electron-updater (reemplaza el viejo version.json)
         // ══════════════════════════════════════════════════════
         (function () {
-            var ipc = null;
-            try { ipc = window.require('electron').ipcRenderer; } catch (e) { }
+            // contextIsolation:true + nodeIntegration:false → window.require NO existe.
+            // El puente real es el que expone preload.js en window.electronAPI.
+            var api = window.electronAPI || null;
 
             function updMostrar(titulo, desc, modo) {
                 var banner = document.getElementById('update-banner');
@@ -12012,28 +12013,29 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             }
 
             window.updDismiss = function () { updMostrar('', '', 'hidden'); };
-            window.updInstall = function () { if (ipc) ipc.send('updater:install'); };
+            window.updInstall = function () { if (api && api.send) api.send('updater:install'); };
 
-            if (ipc) {
-                ipc.on('updater:available', function (ev, info) {
+            if (api && api.on) {
+                // preload.on() ya descarta el evento: el callback recibe solo el dato
+                api.on('updater:available', function (info) {
                     updMostrar('🚀 Nueva versi\u00f3n ' + (info.version || '?'), 'Descargando actualizaci\u00f3n...', 'progress');
                 });
-                ipc.on('updater:progress', function (ev, p) {
+                api.on('updater:progress', function (p) {
                     var pct = Math.round(p.percent || 0);
                     var bar = document.getElementById('upd-progress-bar');
                     if (bar) bar.style.width = pct + '%';
                 });
-                ipc.on('updater:downloaded', function (ev, info) {
+                api.on('updater:downloaded', function (info) {
                     updMostrar('✅ Actualizaci\u00f3n lista', 'Versi\u00f3n ' + (info.version || '?') + ' descargada. Reinici\u00e1 para aplicar.', 'install');
                 });
-                ipc.on('updater:error', function (ev, err) {
+                api.on('updater:error', function (err) {
                     updMostrar('', '', 'hidden');
-                    if (typeof showToast === 'function') showToast('❌ Error de actualizaci\u00f3n: ' + (err.message || ''), 'error');
+                    if (typeof showToast === 'function') showToast('❌ Error de actualizaci\u00f3n: ' + ((err && err.message) || ''), 'error');
                 });
-                ipc.on('updater:not-available', function () { });
+                api.on('updater:not-available', function () { });
             }
 
-            window.checkUpdateManual = function () { if (ipc) ipc.send('updater:check'); };
+            window.checkUpdateManual = function () { if (api && api.send) api.send('updater:check'); };
         })();
     </script>
 
