@@ -2827,6 +2827,31 @@ async function _waDestruirCliente() {
     try { await c.destroy(); } catch (_) {}
 }
 
+// Guarda una foto + estado de la página cuando el bot falla, para poder
+// diagnosticar sin adivinar (red, captcha, sesión vencida, página en blanco).
+async function _waGuardarDiagnostico(motivo) {
+    try {
+        const p = waClient && waClient.pupPage;
+        if (!p) return;
+        const info = await p.evaluate(() => ({
+            url: location.href,
+            titulo: document.title,
+            debugVersion: (window.Debug && window.Debug.VERSION) || null,
+            requireDisponible: typeof window.require,
+            texto: (document.body && document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 600)
+        }));
+        const dir = path.join(DATA_DIR, 'logs');
+        fs.mkdirSync(dir, { recursive: true });
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const base = path.join(dir, 'wa-error-' + stamp);
+        fs.writeFileSync(base + '.json', JSON.stringify({ fecha: new Date().toISOString(), motivo: motivo, ...info }, null, 2));
+        try { await p.screenshot({ path: base + '.png' }); } catch (_) {}
+        logger.warn('[WA Bot] Diagnóstico guardado: ' + base + '.json / .png');
+    } catch (e) {
+        logger.warn('[WA Bot] No se pudo guardar el diagnóstico: ' + e.message);
+    }
+}
+
 function _waPurgarSesion() {
     try {
         fs.rmSync(WA_SESION_DIR, { recursive: true, force: true });
@@ -2975,6 +3000,7 @@ async function _iniciarWABot() {
         _waConectado = false;
         logger.warn('[WA Bot] Error al iniciar: ' + msg);
         if (e && e.stack) logger.warn('[WA Bot] Stack: ' + String(e.stack).split('\n').slice(0, 4).join(' | '));
+        await _waGuardarDiagnostico(msg);
         await _waDestruirCliente();
         // Varios timeouts seguidos apuntan a un perfil de Chrome corrupto:
         // se borra la sesión para poder escanear un QR limpio.
@@ -3020,6 +3046,24 @@ app.post('/api/wa-bot/connect', async (req, res) => {
     _waIniciando = false;
     _iniciarWABot();
     res.json({ ok: true });
+});
+// Borra la sesión de WhatsApp y arranca de cero (perfil de Chrome dañado,
+// dispositivo desvinculado, QR que no aparece, etc.).
+app.post('/api/wa-bot/reset', async (req, res) => {
+    try {
+        await _waDestruirCliente();
+        if (_waTimerReintento) { clearTimeout(_waTimerReintento); _waTimerReintento = null; }
+        _waReintentos = 0;
+        _waError = null;
+        _waIniciando = false;
+        waQR = null;
+        waQRImage = null;
+        _waPurgarSesion();
+        try { db.prepare(`UPDATE whatsapp_sesion SET estado='DESCONECTADO' WHERE id=1`).run(); } catch(_) {}
+        broadcastWS('wa_status', { estado: 'DESCONECTADO', conectado: false });
+        _iniciarWABot();
+        res.json({ ok: true });
+    } catch(e) { res.json({ ok: false, error: e.message }); }
 });
 app.post('/api/wa-bot/send-message', async (req, res) => {
     try {

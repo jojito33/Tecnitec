@@ -4473,6 +4473,12 @@
                     ✅ Chatbot automático conectado
                 </div>
 
+                <!-- Controles del bot: permiten destrabar el arranque sin reiniciar la app -->
+                <div style="display:flex; gap:8px; justify-content:center; margin-bottom:20px; flex-wrap:wrap;">
+                    <button onclick="reintentarBotWA()" style="background:#334155;border:none;color:#cbd5e1;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:.78rem;">🔄 Reiniciar bot</button>
+                    <button onclick="resetBotWA()" style="background:#7f1d1d;border:none;color:#fecaca;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:.78rem;">🧹 Borrar sesión y reconectar</button>
+                </div>
+
                 <!-- Tabs internas -->
                 <div class="cfg-tabs-inner">
                     <button class="cfg-tab-inner active" onclick="mostrarCfgTab('conexion', this)">🔌 Conexión API</button>
@@ -9386,8 +9392,9 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                 }
                 errBox.innerHTML = '<div style="font-weight:700;color:#f87171;margin-bottom:6px;">⚠️ El chatbot no pudo conectar</div>'
                     + '<div style="color:#cbd5e1;word-break:break-word;">' + String(data.error).replace(/</g, '&lt;') + '</div>'
-                    + '<div style="margin-top:10px;display:flex;gap:8px;">'
+                    + '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">'
                     + '<button onclick="reintentarBotWA()" style="background:#ef4444;border:none;color:white;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:.75rem;">Reintentar</button>'
+                    + '<button onclick="resetBotWA()" style="background:#7f1d1d;border:none;color:#fecaca;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:.75rem;">Borrar sesión</button>'
                     + '<button onclick="cerrarAvisoBotWA()" style="background:#334155;border:none;color:#cbd5e1;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:.75rem;">Cerrar</button>'
                     + '</div>';
             } else {
@@ -9400,6 +9407,14 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             apiFetch(`${API}/wa-bot/connect`, { method: 'POST' })
                 .then(() => showToast('🔄 Reintentando conectar el chatbot…', 'info'))
                 .catch(() => {});
+        }
+
+        function resetBotWA() {
+            cerrarAvisoBotWA();
+            if (!confirm('Se va a borrar la sesión de WhatsApp y vas a tener que escanear el QR de nuevo. ¿Continuar?')) return;
+            apiFetch(`${API}/wa-bot/reset`, { method: 'POST' })
+                .then(() => showToast('🧹 Sesión borrada. Esperá el nuevo QR…', 'info'))
+                .catch(() => showToast('❌ No se pudo borrar la sesión', 'error'));
         }
 
         function cerrarAvisoBotWA() {
