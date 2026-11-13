@@ -2811,6 +2811,10 @@ let waQRImage = null;
 let _waIniciando = false;
 let _waConectado = false;   // true SOLO cuando WhatsApp emitió 'ready'
 let _waError = null;
+let _waUltimoMotivo = null;      // último motivo de desconexión (para diagnóstico)
+let _waDesconexiones = 0;        // desconexiones desde el último 'ready'
+let _waManejandoDesconexion = false;
+let _waUltimoDiagnostico = null; // resumen visible en la UI cuando algo falla
 let _waReintentos = 0;
 let _waTimerReintento = null;
 
@@ -2844,8 +2848,10 @@ async function _waGuardarDiagnostico(motivo) {
         fs.mkdirSync(dir, { recursive: true });
         const stamp = new Date().toISOString().replace(/[:.]/g, '-');
         const base = path.join(dir, 'wa-error-' + stamp);
-        fs.writeFileSync(base + '.json', JSON.stringify({ fecha: new Date().toISOString(), motivo: motivo, ...info }, null, 2));
+        const payload = { fecha: new Date().toISOString(), motivo: motivo, ...info };
+        fs.writeFileSync(base + '.json', JSON.stringify(payload, null, 2));
         try { await p.screenshot({ path: base + '.png' }); } catch (_) {}
+        _waUltimoDiagnostico = payload;
         logger.warn('[WA Bot] Diagnóstico guardado: ' + base + '.json / .png');
     } catch (e) {
         logger.warn('[WA Bot] No se pudo guardar el diagnóstico: ' + e.message);
@@ -2945,6 +2951,8 @@ async function _iniciarWABot() {
             _waReintentos = 0;
             _waError = null;
             _waConectado = true;
+            _waDesconexiones = 0;
+            _waUltimoMotivo = null;
             logger.info('[WA Bot] Conectado!');
             try { db.prepare(`UPDATE whatsapp_sesion SET estado='LISTO', conectado_en=datetime('now'), ultima_actividad=datetime('now') WHERE id=1`).run(); } catch(_) {}
             broadcastWS('wa_status', { estado: 'LISTO', conectado: true });
@@ -2982,17 +2990,39 @@ async function _iniciarWABot() {
             }
         });
         waClient.on('disconnected', async (reason) => {
-            _waConectado = false;
-            logger.warn('[WA Bot] Desconectado: ' + reason);
-            try { db.prepare(`UPDATE whatsapp_sesion SET estado='DESCONECTADO' WHERE id=1`).run(); } catch(_) {}
-            broadcastWS('wa_status', { estado: 'DESCONECTADO', conectado: false });
+            if (_waManejandoDesconexion) return;   // evita re-entrar si destroy() vuelve a emitir
+            _waManejandoDesconexion = true;
+            try {
+                _waConectado = false;
+                _waDesconexiones++;
+                const motivo = String(reason || 'sin motivo');
+                _waUltimoMotivo = motivo;
+                _waError = 'desconectado: ' + motivo;
+                logger.warn('[WA Bot] Desconectado (' + _waDesconexiones + '): ' + motivo);
+                try { db.prepare(`UPDATE whatsapp_sesion SET estado='DESCONECTADO' WHERE id=1`).run(); } catch(_) {}
+                broadcastWS('wa_status', { estado: 'DESCONECTADO', conectado: false, motivo });
 
-            const motivo = String(reason || '');
-            // Sesión cerrada desde el teléfono: hay que borrarla para poder escanear un QR nuevo.
-            const sesionInvalida = /LOGOUT|UNPAIRED/i.test(motivo);
-            await _waDestruirCliente();
-            if (sesionInvalida) _waPurgarSesion();
-            _waProgramarReintento('desconectado: ' + (motivo || 'sin motivo'));
+                // Evidencia antes de cerrar el navegador.
+                await _waGuardarDiagnostico('desconectado: ' + motivo);
+                await _waDestruirCliente();
+
+                // WhatsApp desvinculó el dispositivo (LOGOUT): se borra la sesión y NO se
+                // reintenta solo, para no entrar en el ciclo conectar → desconectar.
+                // Queda a la espera de que el usuario escanee un QR nuevo.
+                if (/LOGOUT/i.test(motivo)) {
+                    _waPurgarSesion();
+                    if (_waTimerReintento) { clearTimeout(_waTimerReintento); _waTimerReintento = null; }
+                    _waReintentos = 0;
+                    _waIniciando = false;
+                    _waError = 'WhatsApp desvinculó el dispositivo. Entrá a Ajustes → Chatbot y escaneá el QR de nuevo.';
+                    logger.warn('[WA Bot] Dispositivo desvinculado: se borró la sesión y se detuvo el reintento automático.');
+                    return;
+                }
+
+                _waProgramarReintento('desconectado: ' + motivo);
+            } finally {
+                _waManejandoDesconexion = false;
+            }
         });
         await waClient.initialize();
     } catch(e) {
@@ -3017,6 +3047,9 @@ app.get('/api/wa-bot/qr', (req, res) => {
         need_qr: !!waQR && !_waConectado,
         iniciando: _waIniciando && !_waConectado,
         error: _waError,
+        ultimo_motivo: _waUltimoMotivo,
+        desconexiones: _waDesconexiones,
+        diagnostico: _waUltimoDiagnostico,
         reintentos: _waReintentos
     });
 });

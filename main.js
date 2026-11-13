@@ -32,9 +32,16 @@ process.on('unhandledRejection', function(err) {
     try { require('electron').dialog.showErrorBox('Error de promesa', err.message + '\n\n' + err.stack); } catch(_) {}
 });
 
-// ─── Configuración de logging simple
+// ─── Configuración de logging simple (consola + archivo, para diagnosticar
+// fallas que solo aparecen en la versión compilada, donde no hay consola)
 function writeLog(message) {
     try { console.log('[TECNITEC] ' + message); } catch(_) {}
+    try {
+        const dir = path.join(app.getPath('userData'), 'logs');
+        require('fs').mkdirSync(dir, { recursive: true });
+        require('fs').appendFileSync(path.join(dir, 'main.log'),
+            '[' + new Date().toISOString() + '] ' + message + '\n');
+    } catch(_) {}
 }
 
 // ─── Rutas de datos (modo empaquetado usa userData)

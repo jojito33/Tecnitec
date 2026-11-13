@@ -9392,6 +9392,13 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                 }
                 errBox.innerHTML = '<div style="font-weight:700;color:#f87171;margin-bottom:6px;">⚠️ El chatbot no pudo conectar</div>'
                     + '<div style="color:#cbd5e1;word-break:break-word;">' + String(data.error).replace(/</g, '&lt;') + '</div>'
+                    + (data.diagnostico
+                        ? '<div style="margin-top:8px;padding:8px;background:#0f172a;border-radius:6px;color:#94a3b8;font-size:.7rem;font-family:monospace;white-space:pre-wrap;max-height:170px;overflow:auto;">'
+                            + 'URL: ' + String(data.diagnostico.url || '').replace(/</g, '&lt;') + '\n'
+                            + 'Título: ' + String(data.diagnostico.titulo || '').replace(/</g, '&lt;') + '\n'
+                            + 'Texto: ' + String(data.diagnostico.texto || '').slice(0, 300).replace(/</g, '&lt;')
+                            + '</div>'
+                        : '')
                     + '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">'
                     + '<button onclick="reintentarBotWA()" style="background:#ef4444;border:none;color:white;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:.75rem;">Reintentar</button>'
                     + '<button onclick="resetBotWA()" style="background:#7f1d1d;border:none;color:#fecaca;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:.75rem;">Borrar sesión</button>'
