@@ -2809,6 +2809,7 @@ let waClient = null;
 let waQR = null;
 let waQRImage = null;
 let _waIniciando = false;
+let _waConectado = false;   // true SOLO cuando WhatsApp emitió 'ready'
 let _waError = null;
 let _waReintentos = 0;
 let _waTimerReintento = null;
@@ -2821,6 +2822,7 @@ const WA_SESION_DIR = path.join(DATA_DIR, 'wa-session');
 async function _waDestruirCliente() {
     const c = waClient;
     waClient = null;
+    _waConectado = false;
     if (!c) return;
     try { await c.destroy(); } catch (_) {}
 }
@@ -2891,12 +2893,17 @@ async function _iniciarWABot() {
         }
 
         waClient = new Client({
+            // WhatsApp Web a veces tarda más de 30 s (red lenta, primer arranque,
+            // actualización del bundle). El default de la librería es 30 s y
+            // provoca "Waiting failed: 30000ms exceeded".
+            authTimeoutMs: 180000,
             puppeteer: { executablePath: chromePath, headless: true, args: ['--no-sandbox'] },
             session: null,
             authStrategy: new (require('whatsapp-web.js')).LocalAuth({ dataPath: sesionDir })
         });
         waClient.on('qr', (qr) => {
             waQR = qr;
+            _waConectado = false;
             logger.info('[WA Bot] QR generado (escanear con WhatsApp) type=' + (typeof qr) + ' len=' + (typeof qr === 'string' ? qr.length : 0) + ' preview=' + (typeof qr === 'string' ? qr.substring(0, 80) : JSON.stringify(qr)));
             try {
                 const QRCode = require('qrcode');
@@ -2912,6 +2919,7 @@ async function _iniciarWABot() {
             waQRImage = null;
             _waReintentos = 0;
             _waError = null;
+            _waConectado = true;
             logger.info('[WA Bot] Conectado!');
             try { db.prepare(`UPDATE whatsapp_sesion SET estado='LISTO', conectado_en=datetime('now'), ultima_actividad=datetime('now') WHERE id=1`).run(); } catch(_) {}
             broadcastWS('wa_status', { estado: 'LISTO', conectado: true });
@@ -2949,6 +2957,7 @@ async function _iniciarWABot() {
             }
         });
         waClient.on('disconnected', async (reason) => {
+            _waConectado = false;
             logger.warn('[WA Bot] Desconectado: ' + reason);
             try { db.prepare(`UPDATE whatsapp_sesion SET estado='DESCONECTADO' WHERE id=1`).run(); } catch(_) {}
             broadcastWS('wa_status', { estado: 'DESCONECTADO', conectado: false });
@@ -2962,9 +2971,15 @@ async function _iniciarWABot() {
         });
         await waClient.initialize();
     } catch(e) {
-        logger.warn('[WA Bot] Error al iniciar: ' + e.message);
+        const msg = (e && e.message) || String(e);
+        _waConectado = false;
+        logger.warn('[WA Bot] Error al iniciar: ' + msg);
+        if (e && e.stack) logger.warn('[WA Bot] Stack: ' + String(e.stack).split('\n').slice(0, 4).join(' | '));
         await _waDestruirCliente();
-        _waProgramarReintento('error al iniciar: ' + e.message);
+        // Varios timeouts seguidos apuntan a un perfil de Chrome corrupto:
+        // se borra la sesión para poder escanear un QR limpio.
+        if (/waiting failed|auth timeout/i.test(msg) && _waReintentos >= 2) _waPurgarSesion();
+        _waProgramarReintento('error al iniciar: ' + msg);
     }
 }
 
@@ -2972,16 +2987,18 @@ async function _iniciarWABot() {
 app.get('/api/wa-bot/qr', (req, res) => {
     res.json({
         qr: waQRImage || null,
-        conectado: waQR === null && waClient !== null,
-        need_qr: waQR !== null && waClient !== null,
-        iniciando: waClient === null,
+        conectado: _waConectado,
+        need_qr: !!waQR && !_waConectado,
+        iniciando: _waIniciando && !_waConectado,
         error: _waError,
         reintentos: _waReintentos
     });
 });
 app.post('/api/wa-bot/disconnect', async (req, res) => {
     try {
-        if (waClient) { await waClient.destroy(); waClient = null; }
+        await _waDestruirCliente();
+        if (_waTimerReintento) { clearTimeout(_waTimerReintento); _waTimerReintento = null; }
+        _waIniciando = false;
         waQR = null;
         waQRImage = null;
         try { db.prepare(`UPDATE whatsapp_sesion SET estado='DESCONECTADO' WHERE id=1`).run(); } catch(_) {}
@@ -2990,7 +3007,12 @@ app.post('/api/wa-bot/disconnect', async (req, res) => {
     } catch(e) { res.json({ ok: false, error: e.message }); }
 });
 app.post('/api/wa-bot/connect', async (req, res) => {
-    if (waClient) return res.json({ ok: true, conectado: true });
+    // Si ya está realmente conectado, no hacemos nada.
+    if (_waConectado) return res.json({ ok: true, conectado: true });
+
+    // Cliente colgado (creado pero nunca llegó a 'ready'): se destruye y se arranca de cero.
+    if (waClient) await _waDestruirCliente();
+
     // Reconexión manual: se cancela la espera pendiente y se resetea el contador
     if (_waTimerReintento) { clearTimeout(_waTimerReintento); _waTimerReintento = null; }
     _waReintentos = 0;
@@ -3003,7 +3025,7 @@ app.post('/api/wa-bot/send-message', async (req, res) => {
     try {
         const { telefono, mensaje } = req.body || {};
         if (!telefono || !mensaje) return res.json({ ok: false, error: 'Faltan datos' });
-        if (!waClient) return res.json({ ok: false, error: 'Bot no iniciado', codigo: 'no_bot' });
+        if (!waClient || !_waConectado) return res.json({ ok: false, error: 'Bot no iniciado', codigo: 'no_bot' });
         if (waQR) return res.json({ ok: false, error: 'Escaneá el QR primero', codigo: 'need_qr' });
         let numero = String(telefono).replace(/\D/g, '');
         logger.info('[WA Bot] send-message: telefono_recibido=' + telefono + ' numero_limpio=' + numero + ' waClient=' + (waClient ? 'si' : 'no'));
