@@ -14,3 +14,5 @@ tecnitec_red.json
 .jwt_secret
 .env
 .npmrc
+.npm-cache/
+_acl-repair/
