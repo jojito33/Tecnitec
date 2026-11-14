@@ -2884,6 +2884,24 @@ function _waPurgarSesion() {
     }
 }
 
+// Cierra Chromes que quedaron abiertos con NUESTRA carpeta de sesión. Si dos
+// procesos usan el mismo perfil, WhatsApp cierra la sesión de uno y se produce
+// el ciclo conectar → desconectar.
+function _waCerrarChromeHuerfano() {
+    if (process.platform !== 'win32') return;
+    try {
+        const { execFileSync } = require('child_process');
+        const dir = WA_SESION_DIR.replace(/'/g, "''").toLowerCase();
+        const ps = "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | " +
+            "Where-Object { $_.CommandLine -and $_.CommandLine.ToLower().Contains('" + dir + "') } | " +
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+        execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeout: 20000, windowsHide: true });
+        logger.info('[WA Bot] Limpieza de Chrome huérfanos completada.');
+    } catch (e) {
+        logger.warn('[WA Bot] No se pudo limpiar Chrome huérfanos: ' + e.message);
+    }
+}
+
 function _waProgramarReintento(motivo) {
     _waError = String(motivo || 'error desconocido');
     if (_waTimerReintento) return; // ya hay uno agendado
@@ -2908,6 +2926,8 @@ function _waProgramarReintento(motivo) {
 async function _iniciarWABot() {
     if (_waIniciando) return;
     _waIniciando = true;
+    // Antes de abrir un Chrome nuevo, cerrar los que hayan quedado con este perfil.
+    _waCerrarChromeHuerfano();
     try {
         const { Client } = require('whatsapp-web.js');
         const { mkdirSync } = require('fs');
