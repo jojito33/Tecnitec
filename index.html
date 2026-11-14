@@ -8914,68 +8914,27 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
         }
 
         function recargarWebView() {
-            const wv = document.getElementById('wa-webview');
-            if (!wv) {
-                if (typeof window.abrirWebViewWhatsApp === 'function') window.abrirWebViewWhatsApp();
-                return;
-            }
-            wv.reload();
-            showToast('🔄 Recargando WhatsApp Web...', 'info');
+            if (typeof window.abrirWebViewWhatsApp === 'function') window.abrirWebViewWhatsApp();
         }
 
         function borrarSesionWhatsApp() {
-            if (!confirm('¿Cerrar sesión de WhatsApp Web? Se borrarán los datos locales.')) return;
-            const wv = document.getElementById('wa-webview');
-            if (!wv) return;
-            showToast('🗑 Cerrando sesión de WhatsApp Web...', 'info');
-            // 1. Limpiar storage desde dentro del webview primero (más confiable)
-            try {
-                wv.executeJavaScript(`
-            try {
-                localStorage.clear();
-                sessionStorage.clear();
-                indexedDB.databases().then(function(dbs) {
-                    dbs.forEach(function(db) { indexedDB.deleteDatabase(db.name); });
-                });
-            } catch(e) {}
-            document.cookie.split(';').forEach(function(c) {
-                document.cookie = c.trim().split('=')[0] + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
-            });
-        `);
-            } catch (e) { }
-            // 2. Descargar la página actual
-            wv.src = 'about:blank';
-            setTimeout(() => {
-                // 3. Limpiar datos persistentes de la partición
-                try { wv.clearData({ storages: ['cookies', 'localstorage', 'indexeddb', 'serviceworkers', 'cachestorage', 'websql'] }); } catch (e) { }
-                setTimeout(() => {
-                    // 4. Recargar WhatsApp Web (pedirá QR de nuevo)
-                    wv.src = 'https://web.whatsapp.com';
-                    showToast('✅ Sesión borrada. Escaneá el QR de nuevo.', 'info');
-                }, 500);
-            }, 500);
+            // Ya no hay WhatsApp Web embebido: el botón borra la sesión del bot.
+            if (typeof resetBotWA === 'function') { resetBotWA(); return; }
+            showToast('Usá Ajustes → Chatbot → Borrar sesión', 'info');
         }
 
         async function abrirWAWebView(telefono, mensaje) {
-            var url = 'https://web.whatsapp.com/send?phone=' + telefono.replace(/\D/g, '');
-            if (mensaje) url += '&text=' + mensaje;
+            var url = 'https://web.whatsapp.com/send?phone=' + String(telefono || '').replace(/\D/g, '');
+            if (mensaje) url += '&text=' + encodeURIComponent(mensaje);
             try {
-                await nav('chatbot');
-                var wv = await new Promise(function (resolve) {
-                    var interval = setInterval(function () {
-                        var el = document.getElementById('wa-webview');
-                        if (el) { clearInterval(interval); resolve(el); }
-                    }, 200);
-                    setTimeout(function () { clearInterval(interval); resolve(null); }, 8000);
-                });
-                if (wv && wv.loadURL) {
-                    wv.loadURL(url);
-                    showToast('📩 Abriendo chat...', 'info');
+                if (window.electronAPI && window.electronAPI.invoke) {
+                    await window.electronAPI.invoke('abrir-whatsapp-web', url);
                 } else {
-                    console.warn('Webview no disponible');
+                    window.open(url, '_blank');
                 }
+                showToast('📩 Abriendo chat en el navegador…', 'info');
             } catch (e) {
-                console.error('Error al abrir webview:', e);
+                console.error('Error al abrir WhatsApp Web:', e);
             }
         }
 
@@ -9118,7 +9077,7 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
         <div id="wa-connected-info" style="margin-top:12px; display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
             <div style="font-size:0.75rem; color:var(--text-muted);">
                 El bot se conecta en segundo plano. El QR aparece acá y en Ajustes → Chatbot.
-                WhatsApp Web embebido es opcional (botón 🌐).
+                WhatsApp Web se abre en tu navegador (botón 🌐).
             </div>
             <div style="display:flex; align-items:center; gap:6px; font-size:0.7rem; color:var(--text-muted); margin-left:auto;">
                 <span id="ai-status-dot" style="width:8px;height:8px;border-radius:50%;background:#64748b;display:inline-block;"></span>
@@ -9188,38 +9147,31 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             <div>El bot de WhatsApp se conecta solo, en segundo plano.<br>
                 El QR aparece en esta pantalla y en <b>Ajustes → Chatbot</b>.</div>
             <button onclick="abrirWebViewWhatsApp()" style="padding:8px 14px; background:var(--accent); color:var(--text); border:1px solid #334155; border-radius:8px; cursor:pointer; font-size:.75rem;">
-                🌐 Abrir WhatsApp Web (opcional)
+                🌐 Abrir WhatsApp Web en el navegador
             </button>
-            <div style="font-size:.7rem; color:#64748b; max-width:420px;">Abrirlo consume bastante memoria y usa otra sesión de WhatsApp. Usalo solo si necesitás responder a mano.</div>
+            <div style="font-size:.7rem; color:#64748b; max-width:420px;">Se abre en Chrome/Edge, fuera de la app, para no colgarla. El bot sigue respondiendo solo acá.</div>
         </div>
     </div>
 
     </div><!-- fin wa-panel -->`;
 
-            // Crear el <webview> SOLO si el usuario lo pide (ver abrirWebViewWhatsApp
-            // más abajo). Cargarlo siempre duplicaba la memoria y competía con el bot.
-            const _MONITOR_CODE = document.getElementById('wv-monitor-code').textContent;
+            // WhatsApp Web se abre en el navegador del sistema: embeberlo dentro de
+            // la app (webview) colgaba la interfaz en equipos con poca memoria.
+            // El bot sigue trabajando en segundo plano con su propio Chrome.
             window.abrirWebViewWhatsApp = function () {
-                const container = document.getElementById('wa-webview-container');
-                if (!container) return;
-                if (document.getElementById('wa-webview')) { showToast('WhatsApp Web ya está abierto', 'info'); return; }
-                container.innerHTML = '';
-                const wv = document.createElement('webview');
-                wv.id = 'wa-webview';
-                wv.setAttribute('partition', 'persist:whatsapp');
-                wv.setAttribute('src', 'https://web.whatsapp.com');
-                wv.setAttribute('useragent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36');
-                wv.setAttribute('allowpopups', '');
-                wv.style.cssText = 'flex:1; border:none; height:100%; width:100%;';
-                wv.addEventListener('did-fail-load', function (e) {
-                    if (e.errorCode === -2 && e.validatedURL === 'about:blank') return;
-                    console.warn('[WebView] did-fail-load:', e.errorCode, e.errorDescription, e.validatedURL);
-                });
-                container.appendChild(wv);
-                _arrancarMonitor(wv);
-                showToast('🌐 Abriendo WhatsApp Web…', 'info');
+                try {
+                    if (window.electronAPI && window.electronAPI.invoke) {
+                        window.electronAPI.invoke('abrir-whatsapp-web');
+                        showToast('🌐 Abriendo WhatsApp Web en tu navegador…', 'info');
+                        return;
+                    }
+                } catch (_) { }
+                window.open('https://web.whatsapp.com', '_blank');
+                showToast('🌐 Abriendo WhatsApp Web en tu navegador…', 'info');
             };
-            // ── Monitor de mensajes entrantes (ejecutado desde el renderer, sin mixed content) ──
+            // ── Monitor de mensajes entrantes (solo se usa si hubiera webview;
+            // se conserva por compatibilidad, ya no se arranca) ──
+            const _MONITOR_CODE = (document.getElementById('wv-monitor-code') || {}).textContent || '';
             function _arrancarMonitor(wv) {
                 wv.addEventListener('did-finish-load', function () {
                     var url = wv.getURL();
@@ -12738,34 +12690,14 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             window.toggleConsultas = toggleConsultas;
 
             function enviarPlantilla(texto) {
-                var wv = document.getElementById('wa-webview');
-                if (!wv || !wv.executeJavaScript) return;
-                var js = [
-                    '(function(){',
-                    '  try {',
-                    '    var inp = document.querySelector(\'div[contenteditable="true"]\');',
-                    '    if (!inp) return "no-input";',
-                    '    inp.focus();',
-                    '    var text = ' + JSON.stringify(texto) + ';',
-                    '    document.execCommand("selectAll");',
-                    '    document.execCommand("insertText", false, text);',
-                    '    setTimeout(function() {',
-                    '      var btn = document.querySelector(\'button[aria-label="Enviar"],button[aria-label="Send"],button[data-testid="compose-btn-send"],footer button:last-child\');',
-                    '      if (btn) { btn.click(); return "sent"; }',
-                    '      var spans = document.querySelectorAll(\'button span[data-icon="send"]\');',
-                    '      for (var i=0;i<spans.length;i++) { var b=spans[i].closest("button"); if(b){b.click();return "sent";} }',
-                    '      return "no-btn";',
-                    '    }, 600);',
-                    '    return "ok";',
-                    '  } catch(e) { return "err:"+e.message; }',
-                    '})();'
-                ].join('\n');
-                wv.executeJavaScript(js).then(function (r) {
-                    if (r && r !== 'ok' && r !== 'sent') showToast('⚠️ WhatsApp: ' + r + '. Probá pegarlo manualmente.', 'warning');
-                    else showToast('✅ Plantilla enviada', 'success');
-                }).catch(function (err) {
-                    showToast('❌ Error: ' + (err.message || err), 'error');
-                });
+                // Ya no hay WhatsApp Web embebido: la plantilla se copia al portapapeles
+                // para pegarla en el navegador donde está abierto WhatsApp Web.
+                try {
+                    navigator.clipboard.writeText(texto);
+                    showToast('📋 Plantilla copiada. Pegala en WhatsApp Web.', 'success');
+                } catch (e) {
+                    showToast('No se pudo copiar la plantilla', 'error');
+                }
             }
             window.enviarPlantilla = enviarPlantilla;
 

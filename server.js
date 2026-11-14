@@ -2058,10 +2058,25 @@ async function verificarOllama() {
 function _iniciarOllama() {
     if (_ollamaProceso) return;
     const spawn = require('child_process').spawn;
-    const cmd = process.platform === 'win32' ? 'ollama.exe' : 'ollama';
+
+    // Buscar ollama.exe en las rutas típicas de instalación (no siempre está en PATH).
+    let cmd = process.platform === 'win32' ? 'ollama.exe' : 'ollama';
+    if (process.platform === 'win32') {
+        const candidatos = [
+            path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Ollama', 'ollama.exe'),
+            path.join(process.env.ProgramFiles || '', 'Ollama', 'ollama.exe'),
+            path.join(process.env['ProgramFiles(x86)'] || '', 'Ollama', 'ollama.exe'),
+            path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'Programs', 'Ollama', 'ollama.exe')
+        ];
+        for (const c of candidatos) {
+            try { if (c && fs.existsSync(c)) { cmd = c; break; } } catch (_) {}
+        }
+    }
+
     _ollamaProceso = spawn(cmd, ['serve'], { stdio: 'ignore', detached: true });
     _ollamaProceso.on('error', (err) => {
         logger.warn('[Ollama] No se pudo iniciar: ' + err.message);
+        logger.warn('[Ollama] Buscado en: ' + cmd);
         logger.warn('[Ollama] Instalalo desde https://ollama.com/download');
         _ollamaProceso = null;
     });
@@ -3056,6 +3071,17 @@ async function _iniciarWABot() {
             }
         });
         await waClient.initialize();
+
+        // El Chrome del bot en prioridad baja: que no compita con la interfaz.
+        try {
+            const osMod = require('os');
+            const br = waClient.pupBrowser;
+            const procChrome = br && typeof br.process === 'function' ? br.process() : null;
+            if (procChrome && procChrome.pid) {
+                osMod.setPriority(procChrome.pid, osMod.constants.priority.PRIORITY_BELOW_NORMAL);
+                logger.info('[WA Bot] Chrome en prioridad baja (pid ' + procChrome.pid + ')');
+            }
+        } catch (_) {}
     } catch(e) {
         const msg = (e && e.message) || String(e);
         _waConectado = false;

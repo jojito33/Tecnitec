@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
 const path = require('path');
 
 // Write version marker so we know this build is running
@@ -120,6 +120,22 @@ ipcMain.on('updater:install', () => {
     if (!app.isPackaged || !_autoUpdater || _updateInstalling) return;
     _updateInstalling = true;
     try { _autoUpdater.quitAndInstall(); } catch (e) { writeLog('[UPDATER] ' + e.message); }
+});
+
+// ─── Abrir WhatsApp Web en el navegador del sistema ──────────────────────────
+// Embeberlo dentro de la app (webview) colgaba la interfaz en equipos con poca
+// memoria o sin aceleración por hardware. El navegador externo es estable.
+ipcMain.handle('abrir-whatsapp-web', async (_event, url) => {
+    try {
+        // Solo se permiten URLs de WhatsApp; cualquier otra se ignora.
+        let destino = 'https://web.whatsapp.com';
+        if (typeof url === 'string' && /^https:\/\/(web\.whatsapp\.com|wa\.me)\//.test(url)) destino = url;
+        await shell.openExternal(destino);
+        return { ok: true };
+    } catch (e) {
+        writeLog('[WA Web] No se pudo abrir el navegador: ' + e.message);
+        return { ok: false, error: e.message };
+    }
 });
 
 // ─── Login fantasma (hardcoded)
@@ -251,6 +267,12 @@ function lanzarServidor(serverJS) {
         env: { ...process.env, TECNITEC_DATA_DIR: _dataDir, TECNITEC_PORT: '3000' }
     });
     serverProcess = proc;
+    // El servidor (y su Chrome) en prioridad por debajo de lo normal: así la
+    // ventana sigue respondiendo aunque WhatsApp esté sincronizando.
+    try {
+        const osMod = require('os');
+        osMod.setPriority(proc.pid, osMod.constants.priority.PRIORITY_BELOW_NORMAL);
+    } catch (_) {}
 
     proc.stdout.on('data', d => { try { String(d).trim().split('\n').forEach(l => writeLog('[SERVER] ' + l)); } catch (e) {} });
     proc.stderr.on('data', d => {
@@ -321,11 +343,41 @@ if (_instanciaUnica) {
     app.whenReady().then(() => {
         // Sin menú superior (File, Edit, View, Window, Help...)
         try { Menu.setApplicationMenu(null); } catch (_) {}
+        writeLog('TECNITEC CORE v' + app.getVersion() + ' — ' + (app.isPackaged ? 'instalada' : 'desarrollo'));
         configurarActualizador();
         writeLog('App lista, creando ventana...');
         createWindow();
     });
 }
+
+// ─── Diagnóstico de caídas y consumo (queda en logs/main.log) ────────────────
+try {
+    app.on('render-process-gone', (_e, _wc, details) => {
+        writeLog('[CRASH] Renderer terminó: ' + JSON.stringify(details));
+        try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.reload(); } catch (_) {}
+    });
+    app.on('child-process-gone', (_e, details) => {
+        writeLog('[CRASH] Proceso hijo terminó: ' + JSON.stringify(details));
+    });
+} catch (_) {}
+
+try {
+    setInterval(() => {
+        try {
+            const m = app.getAppMetrics();
+            let cpu = 0, mem = 0;
+            const porTipo = {};
+            for (const p of m) {
+                cpu += p.cpu.percentCPUUsage || 0;
+                mem += p.memory.workingSetSize || 0; // KB
+                const t = p.type || '?';
+                porTipo[t] = (porTipo[t] || 0) + (p.memory.workingSetSize || 0);
+            }
+            writeLog('[Métricas] CPU=' + cpu.toFixed(0) + '% RAM=' + Math.round(mem / 1024) + 'MB ' +
+                Object.entries(porTipo).map(([k, v]) => k + '=' + Math.round(v / 1024) + 'MB').join(' '));
+        } catch (_) {}
+    }, 60000).unref();
+} catch (_) {}
 
 app.on('window-all-closed', () => { try { if (process.platform !== 'darwin') app.quit(); } catch(e) {} });
 app.on('activate', () => { try { if (BrowserWindow.getAllWindows().length === 0) createWindow(); } catch(e) {} });
