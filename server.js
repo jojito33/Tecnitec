@@ -2815,6 +2815,8 @@ let _waUltimoMotivo = null;      // último motivo de desconexión (para diagnó
 let _waDesconexiones = 0;        // desconexiones desde el último 'ready'
 let _waManejandoDesconexion = false;
 let _waUltimoDiagnostico = null; // resumen visible en la UI cuando algo falla
+let _waPendientesIA = 0;         // mensajes esperando respuesta de la IA
+let _waColaIA = Promise.resolve(); // cola serial: nunca más de una generación a la vez
 let _waReintentos = 0;
 let _waTimerReintento = null;
 
@@ -2928,7 +2930,13 @@ async function _iniciarWABot() {
             // actualización del bundle). El default de la librería es 30 s y
             // provoca "Waiting failed: 30000ms exceeded".
             authTimeoutMs: 180000,
-            puppeteer: { executablePath: chromePath, headless: true, args: ['--no-sandbox'] },
+            puppeteer: {
+                executablePath: chromePath,
+                headless: true,
+                // Menos consumo de RAM: sin GPU, sin rasterizado por software y
+                // limitando la cantidad de procesos de render.
+                args: ['--no-sandbox', '--disable-gpu', '--disable-software-rasterizer', '--disable-dev-shm-usage', '--renderer-process-limit=2', '--disable-extensions']
+            },
             session: null,
             authStrategy: new (require('whatsapp-web.js')).LocalAuth({ dataPath: sesionDir })
         });
@@ -2960,31 +2968,54 @@ async function _iniciarWABot() {
         waClient.on('message', async (msg) => {
             try {
                 if (msg.fromMe) return;
+
+                // El chatbot es de atención 1 a 1: se ignoran grupos (@g.us), estados
+                // y difusiones. Procesarlos llenaba la memoria (decenas de mensajes
+                // por minuto, cada uno con consulta a la IA) y terminaba en
+                // "JavaScript heap out of memory".
+                const from = String(msg.from || '');
+                if (from.endsWith('@g.us')) return;
+                if (msg.isStatus || from === 'status@broadcast' || from.endsWith('@broadcast')) return;
+
                 const texto = msg.body || '';
                 if (!texto.trim()) return;
-                const contacto = await msg.getContact();
-                const nombre = contacto.pushname || contacto.name || msg.from;
-                const telefono = msg.from;
-                logger.info('[WA Bot] Mensaje de ' + nombre + ': ' + texto.substring(0, 80));
-                broadcastWS('wa_message', { nombre, texto, telefono, fecha: new Date().toISOString(), origen: 'bot' });
+
+                // Primero el interruptor: si la IA está apagada no se procesa nada.
                 const cfg = await dbGet("SELECT valor FROM chatbot_config WHERE clave='ai_activo'");
                 if (!cfg || cfg.valor !== '1') return;
-                const result = await dbRun(
-                    "INSERT INTO consultas_presupuesto (telefono_cliente, nombre_cliente, descripcion, fecha, estado) VALUES (?,?,?,?,?)",
-                    [telefono, nombre, texto, new Date().toISOString(), 'pendiente']
-                );
-                const consultaId = result.lastInsertRowid;
-                // Generar respuesta IA
-                const respuesta = await generarRespuestaIA(texto, `\nMensaje de WhatsApp de ${nombre}, tel: ${telefono}`);
-                if (respuesta) {
-                    await msg.reply(respuesta);
-                    await dbRun(
-                        `UPDATE consultas_presupuesto SET estado='respondida', tecnico_asignado='IA Automática', fecha_respuesta=?, respuesta_automatica=1, respuesta_ia=? WHERE id=?`,
-                        [new Date().toISOString(), respuesta, consultaId]
-                    );
-                    logger.info('[WA Bot] Respuesta enviada a ' + nombre);
-                    broadcastWS('consulta_respondida', { consulta_id: consultaId, respuesta });
+
+                // Cola acotada: si se acumulan mensajes, se descartan en vez de
+                // encolar consultas a Ollama sin límite.
+                if (_waPendientesIA >= 20) {
+                    logger.warn('[WA Bot] Cola de IA llena (' + _waPendientesIA + '): se descarta un mensaje');
+                    return;
                 }
+
+                const nombre = (msg._data && msg._data.notifyName) || from;
+                logger.info('[WA Bot] Mensaje de ' + nombre + ': ' + texto.substring(0, 60));
+                broadcastWS('wa_message', { nombre, texto, telefono: from, fecha: new Date().toISOString(), origen: 'bot' });
+
+                _waPendientesIA++;
+                _waColaIA = _waColaIA
+                    .then(async () => {
+                        const result = await dbRun(
+                            "INSERT INTO consultas_presupuesto (telefono_cliente, nombre_cliente, descripcion, fecha, estado) VALUES (?,?,?,?,?)",
+                            [from, nombre, texto, new Date().toISOString(), 'pendiente']
+                        );
+                        const consultaId = result.lastInsertRowid;
+                        const respuesta = await generarRespuestaIA(texto, `\nMensaje de WhatsApp de ${nombre}, tel: ${from}`);
+                        if (respuesta) {
+                            await msg.reply(respuesta);
+                            await dbRun(
+                                `UPDATE consultas_presupuesto SET estado='respondida', tecnico_asignado='IA Automática', fecha_respuesta=?, respuesta_automatica=1, respuesta_ia=? WHERE id=?`,
+                                [new Date().toISOString(), respuesta, consultaId]
+                            );
+                            logger.info('[WA Bot] Respuesta enviada a ' + nombre);
+                            broadcastWS('consulta_respondida', { consulta_id: consultaId, respuesta });
+                        }
+                    })
+                    .catch(e => logger.warn('[WA Bot] Error procesando mensaje: ' + e.message))
+                    .finally(() => { _waPendientesIA--; });
             } catch(e) {
                 logger.warn('[WA Bot] Error procesando mensaje: ' + e.message);
             }
@@ -3038,6 +3069,21 @@ async function _iniciarWABot() {
         _waProgramarReintento('error al iniciar: ' + msg);
     }
 }
+
+// Vigilancia de memoria: si el proceso crece demasiado se reinicia el bot
+// (Chrome incluido) antes de que el sistema se quede sin memoria y muera todo.
+setInterval(() => {
+    try {
+        const mb = Math.round(process.memoryUsage().rss / 1048576);
+        if (mb >= 800) logger.warn('[Memoria] RSS del servidor: ' + mb + ' MB');
+        if (mb >= 1400 && waClient && !_waManejandoDesconexion) {
+            logger.error('[Memoria] ' + mb + ' MB: reiniciando el bot para liberar memoria');
+            _waDestruirCliente()
+                .then(() => _waProgramarReintento('memoria alta (' + mb + ' MB)'))
+                .catch(() => {});
+        }
+    } catch (_) {}
+}, 60000).unref();
 
 // Endpoints para el bot
 app.get('/api/wa-bot/qr', (req, res) => {
