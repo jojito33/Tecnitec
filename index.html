@@ -8915,7 +8915,10 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
 
         function recargarWebView() {
             const wv = document.getElementById('wa-webview');
-            if (!wv) return;
+            if (!wv) {
+                if (typeof window.abrirWebViewWhatsApp === 'function') window.abrirWebViewWhatsApp();
+                return;
+            }
             wv.reload();
             showToast('🔄 Recargando WhatsApp Web...', 'info');
         }
@@ -9087,6 +9090,10 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
 
             <!-- Botones de control -->
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button onclick="abrirWebViewWhatsApp()" title="Abrir WhatsApp Web (opcional)"
+                    style="padding:10px 14px; background:var(--accent); color:var(--text); border:1px solid #334155; border-radius:10px; cursor:pointer; font-weight:bold; font-size:0.85rem;">
+                    🌐
+                </button>
                 <button onclick="recargarWebView()" title="Recargar WhatsApp Web"
                     style="padding:10px 14px; background:var(--whatsapp); color:white; border:none; border-radius:10px; cursor:pointer; font-weight:bold; font-size:0.85rem;">
                     🔄
@@ -9110,7 +9117,8 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
         <!-- Info simplificada + estado IA -->
         <div id="wa-connected-info" style="margin-top:12px; display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
             <div style="font-size:0.75rem; color:var(--text-muted);">
-                WhatsApp Web cargado abajo. Escaneá el QR con tu teléfono para vincular.
+                El bot se conecta en segundo plano. El QR aparece acá y en Ajustes → Chatbot.
+                WhatsApp Web embebido es opcional (botón 🌐).
             </div>
             <div style="display:flex; align-items:center; gap:6px; font-size:0.7rem; color:var(--text-muted); margin-left:auto;">
                 <span id="ai-status-dot" style="width:8px;height:8px;border-radius:50%;background:#64748b;display:inline-block;"></span>
@@ -9172,16 +9180,30 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
       <div id="plantillas-barra-botones" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
     </div>
 
-    <!-- WhatsApp Web embebido — el <webview> se crea con createElement abajo -->
-    <div id="wa-webview-container" style="flex:1; display:flex; flex-direction:column; position:relative; min-height:0;"></div>
+    <!-- WhatsApp Web embebido (OPCIONAL: no se carga solo, para no duplicar memoria
+         ni competir con la sesión del bot) -->
+    <div id="wa-webview-container" style="flex:1; display:flex; flex-direction:column; position:relative; min-height:0;">
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:28px; border:1px dashed #334155; border-radius:12px; color:#94a3b8; font-size:.8rem; text-align:center;">
+            <div style="font-size:1.8rem;">📱</div>
+            <div>El bot de WhatsApp se conecta solo, en segundo plano.<br>
+                El QR aparece en esta pantalla y en <b>Ajustes → Chatbot</b>.</div>
+            <button onclick="abrirWebViewWhatsApp()" style="padding:8px 14px; background:var(--accent); color:var(--text); border:1px solid #334155; border-radius:8px; cursor:pointer; font-size:.75rem;">
+                🌐 Abrir WhatsApp Web (opcional)
+            </button>
+            <div style="font-size:.7rem; color:#64748b; max-width:420px;">Abrirlo consume bastante memoria y usa otra sesión de WhatsApp. Usalo solo si necesitás responder a mano.</div>
+        </div>
+    </div>
 
     </div><!-- fin wa-panel -->`;
 
-            // Crear el <webview> y arrancar monitor IA
-            (function crearWebView() {
+            // Crear el <webview> SOLO si el usuario lo pide (ver abrirWebViewWhatsApp
+            // más abajo). Cargarlo siempre duplicaba la memoria y competía con el bot.
+            const _MONITOR_CODE = document.getElementById('wv-monitor-code').textContent;
+            window.abrirWebViewWhatsApp = function () {
                 const container = document.getElementById('wa-webview-container');
                 if (!container) return;
-                if (document.getElementById('wa-webview')) return;
+                if (document.getElementById('wa-webview')) { showToast('WhatsApp Web ya está abierto', 'info'); return; }
+                container.innerHTML = '';
                 const wv = document.createElement('webview');
                 wv.id = 'wa-webview';
                 wv.setAttribute('partition', 'persist:whatsapp');
@@ -9194,11 +9216,10 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                     console.warn('[WebView] did-fail-load:', e.errorCode, e.errorDescription, e.validatedURL);
                 });
                 container.appendChild(wv);
-                // ── IA: Inyectar monitor + poll ──
                 _arrancarMonitor(wv);
-            })();
+                showToast('🌐 Abriendo WhatsApp Web…', 'info');
+            };
             // ── Monitor de mensajes entrantes (ejecutado desde el renderer, sin mixed content) ──
-            const _MONITOR_CODE = document.getElementById('wv-monitor-code').textContent;
             function _arrancarMonitor(wv) {
                 wv.addEventListener('did-finish-load', function () {
                     var url = wv.getURL();
