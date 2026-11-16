@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell, session } = require('electron');
 const path = require('path');
 
 // Write version marker so we know this build is running
@@ -122,9 +122,9 @@ ipcMain.on('updater:install', () => {
     try { _autoUpdater.quitAndInstall(); } catch (e) { writeLog('[UPDATER] ' + e.message); }
 });
 
-// ─── Abrir WhatsApp Web en el navegador del sistema ──────────────────────────
-// Embeberlo dentro de la app (webview) colgaba la interfaz en equipos con poca
-// memoria o sin aceleración por hardware. El navegador externo es estable.
+// ─── Abrir WhatsApp Web en el navegador del sistema (respaldo) ───────────────
+// La vista principal va embebida en el módulo; esto queda como escape si el
+// webview no puede cargar (empresa con proxy restrictivo, WebGL bloqueado, etc.).
 ipcMain.handle('abrir-whatsapp-web', async (_event, url) => {
     try {
         // Solo se permiten URLs de WhatsApp; cualquier otra se ignora.
@@ -134,6 +134,73 @@ ipcMain.handle('abrir-whatsapp-web', async (_event, url) => {
         return { ok: true };
     } catch (e) {
         writeLog('[WA Web] No se pudo abrir el navegador: ' + e.message);
+        return { ok: false, error: e.message };
+    }
+});
+
+// Abre links externos (solo https) en el navegador del sistema. Se usa para
+// los enlaces que aparecen dentro de WhatsApp Web.
+ipcMain.handle('abrir-enlace-externo', async (_event, url) => {
+    try {
+        if (typeof url !== 'string' || !/^https:\/\//i.test(url)) return { ok: false, error: 'URL no permitida' };
+        await shell.openExternal(url);
+        return { ok: true };
+    } catch (e) {
+        writeLog('[WA Web] No se pudo abrir enlace externo: ' + e.message);
+        return { ok: false, error: e.message };
+    }
+});
+
+// ─── WhatsApp Web embebido: seguridad, sesión y ciclo de vida ────────────────
+const WA_PARTITION = 'persist:whatsapp';
+const WA_EMBED_SRC_RE = /^https:\/\/web\.whatsapp\.com(\/|$)/i;
+const WA_NAV_RE = /^https:\/\/([a-z0-9-]+\.)?whatsapp\.(com|net)(\/|$)/i;
+
+// Endurece cualquier <webview> que se adjunte: solo WhatsApp, sin Node, con
+// sandbox y con el preload del host eliminado. Si alguien intenta inyectar otra
+// URL, el attach se cancela.
+app.on('web-contents-created', (_e, contents) => {
+    contents.on('will-attach-webview', (event, webPreferences, params) => {
+        const src = String((params && params.src) || '');
+        const partition = String((params && params.partition) || '');
+        if (partition !== WA_PARTITION || !(src === '' || src === 'about:blank' || WA_EMBED_SRC_RE.test(src))) {
+            writeLog('[WA Web] webview bloqueado (partition=' + partition + ', src=' + src + ')');
+            event.preventDefault();
+            return;
+        }
+        delete webPreferences.preload;
+        webPreferences.nodeIntegration = false;
+        webPreferences.nodeIntegrationInSubFrames = false;
+        webPreferences.contextIsolation = true;
+        webPreferences.sandbox = true;
+        webPreferences.webSecurity = true;
+    });
+
+    if (contents.getType() === 'webview') {
+        // Los links externos de WhatsApp (wa.me, webs) se abren afuera; nunca
+        // dentro de la app ni en una ventana Electron sin control.
+        contents.setWindowOpenHandler(({ url }) => {
+            if (/^https:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
+            return { action: 'deny' };
+        });
+        contents.on('will-navigate', (event, url) => {
+            if (WA_NAV_RE.test(url)) return;
+            event.preventDefault();
+            if (/^https:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
+        });
+    }
+});
+
+// Borra SOLO la sesión del WhatsApp Web embebido (no toca la del bot LocalAuth).
+ipcMain.handle('wa-embed-clear-session', async () => {
+    try {
+        const s = session.fromPartition(WA_PARTITION);
+        await s.clearStorageData();
+        await s.clearCache();
+        writeLog('[WA Web] Sesión del WhatsApp Web embebido borrada');
+        return { ok: true };
+    } catch (e) {
+        writeLog('[WA Web] No se pudo borrar la sesión embebida: ' + e.message);
         return { ok: false, error: e.message };
     }
 });
@@ -180,7 +247,22 @@ function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1400, height: 900, show: false, backgroundColor: '#0b0f1a',
         title: 'TECNITEC CORE v31.82', icon: path.join(__dirname, 'logo.png'),
+        // WhatsApp Web va embebido en el módulo. El webview se crea desde el
+        // renderer con partition propia, sin Node y con sandbox; main.js aplica
+        // la lista blanca de orígenes y el manejo de links externos.
         webPreferences: { nodeIntegration: false, contextIsolation: true, webviewTag: true, preload: path.join(__dirname, 'preload.js') }
+    });
+
+    // Recuperación si el renderer de la ventana principal se cae: sin esto la
+    // ventana queda en blanco (el evento a nivel app no siempre llega en
+    // Electron 28; el de webContents sí).
+    mainWindow.webContents.on('render-process-gone', (_e, details) => {
+        writeLog('[CRASH] Renderer principal: ' + JSON.stringify(details));
+        if (!_puedeRecargarRenderer()) {
+            writeLog('[CRASH] Demasiadas recargas seguidas: no se recarga de nuevo para evitar un bucle');
+            return;
+        }
+        setTimeout(() => { try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.reload(); } catch (_) {} }, 300);
     });
 
     // Cargar índice IMEDIATAMENTE - el servidor inicia en segundo plano
@@ -351,10 +433,32 @@ if (_instanciaUnica) {
 }
 
 // ─── Diagnóstico de caídas y consumo (queda en logs/main.log) ────────────────
+// Si el renderer de la ventana principal se cae, se recarga la UI. Pero un
+// webview invitado (por ejemplo WhatsApp Web embebido) NO debe recargar toda la
+// ventana: eso desconectaba el WebSocket y mostraba "Servidor desconectado".
+const _recargasRenderer = [];
+function _puedeRecargarRenderer() {
+    const ahora = Date.now();
+    while (_recargasRenderer.length && ahora - _recargasRenderer[0] > 60000) _recargasRenderer.shift();
+    if (_recargasRenderer.length >= 2) return false;
+    _recargasRenderer.push(ahora);
+    return true;
+}
+
 try {
-    app.on('render-process-gone', (_e, _wc, details) => {
-        writeLog('[CRASH] Renderer terminó: ' + JSON.stringify(details));
-        try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.reload(); } catch (_) {}
+    app.on('render-process-gone', (_e, wc, details) => {
+        const esPrincipal = !!(mainWindow && !mainWindow.isDestroyed() && wc === mainWindow.webContents);
+        // La ventana principal se maneja con mainWindow.webContents.on(...) en
+        // createWindow(). Acá solo se registran los invitados (webviews).
+        if (esPrincipal) return;
+        writeLog('[CRASH] Renderer invitado (webview): ' + JSON.stringify(details));
+        // El módulo de WhatsApp escucha este aviso y recrea SOLO su webview.
+        // Nunca se recarga la ventana completa por una caída del invitado.
+        try {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('wa-embed-gone', details || {});
+            }
+        } catch (_) {}
     });
     app.on('child-process-gone', (_e, details) => {
         writeLog('[CRASH] Proceso hijo terminó: ' + JSON.stringify(details));

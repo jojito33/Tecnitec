@@ -2887,19 +2887,28 @@ function _waPurgarSesion() {
 // Cierra Chromes que quedaron abiertos con NUESTRA carpeta de sesión. Si dos
 // procesos usan el mismo perfil, WhatsApp cierra la sesión de uno y se produce
 // el ciclo conectar → desconectar.
+// Se usa execFile (asíncrono): antes era execFileSync y, si PowerShell/WMI
+// tardaba, el event loop del servidor quedaba bloqueado hasta 20 s y la UI
+// mostraba "Servidor desconectado" aunque el proceso siguiera vivo.
 function _waCerrarChromeHuerfano() {
-    if (process.platform !== 'win32') return;
-    try {
-        const { execFileSync } = require('child_process');
-        const dir = WA_SESION_DIR.replace(/'/g, "''").toLowerCase();
-        const ps = "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | " +
-            "Where-Object { $_.CommandLine -and $_.CommandLine.ToLower().Contains('" + dir + "') } | " +
-            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
-        execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeout: 20000, windowsHide: true });
-        logger.info('[WA Bot] Limpieza de Chrome huérfanos completada.');
-    } catch (e) {
-        logger.warn('[WA Bot] No se pudo limpiar Chrome huérfanos: ' + e.message);
-    }
+    if (process.platform !== 'win32') return Promise.resolve();
+    return new Promise((resolve) => {
+        try {
+            const { execFile } = require('child_process');
+            const dir = WA_SESION_DIR.replace(/'/g, "''").toLowerCase();
+            const ps = "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | " +
+                "Where-Object { $_.CommandLine -and $_.CommandLine.ToLower().Contains('" + dir + "') } | " +
+                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+            execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeout: 20000, windowsHide: true }, (err) => {
+                if (err) logger.warn('[WA Bot] No se pudo limpiar Chrome huérfanos: ' + err.message);
+                else logger.info('[WA Bot] Limpieza de Chrome huérfanos completada.');
+                resolve();
+            });
+        } catch (e) {
+            logger.warn('[WA Bot] No se pudo limpiar Chrome huérfanos: ' + e.message);
+            resolve();
+        }
+    });
 }
 
 function _waProgramarReintento(motivo) {
@@ -2927,7 +2936,8 @@ async function _iniciarWABot() {
     if (_waIniciando) return;
     _waIniciando = true;
     // Antes de abrir un Chrome nuevo, cerrar los que hayan quedado con este perfil.
-    _waCerrarChromeHuerfano();
+    // (asíncrono: no bloquea el servidor mientras PowerShell/WMI responde)
+    await _waCerrarChromeHuerfano();
     try {
         const { Client } = require('whatsapp-web.js');
         const { mkdirSync } = require('fs');

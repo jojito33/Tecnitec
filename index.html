@@ -3273,6 +3273,8 @@
         // Estado de conexión con el servidor
         let _serverOnline = true;
         let _serverOfflineBanner = null;
+        let _fallosRedSeguidos = 0;
+        let _avisoOfflineTimer = null;
 
         function _mostrarBannerOffline() {
             if (_serverOfflineBanner) return;
@@ -3306,6 +3308,8 @@
             let response;
             try {
                 response = await fetch(url, { ...options, headers });
+                _fallosRedSeguidos = 0;
+                if (_avisoOfflineTimer) { clearTimeout(_avisoOfflineTimer); _avisoOfflineTimer = null; }
                 // Servidor respondió — si estaba offline, recuperamos
                 if (!_serverOnline) {
                     _serverOnline = true;
@@ -3315,11 +3319,25 @@
                 progressDone();
             } catch (networkErr) {
                 progressDone();
-                // Error de red — servidor caído o reiniciándose
-                if (_serverOnline) {
-                    _serverOnline = false;
-                    _mostrarBannerOffline();
-                    showToast('❌ No se puede conectar con el servidor', 'error', 6000);
+                // Un solo fallo no significa que el servidor esté caído: al abrir
+                // un módulo se disparan varias peticiones y, durante el arranque
+                // (o un pico de CPU), alguna puede fallar. Se confirma con
+                // /api/health antes de mostrar el cartel rojo.
+                _fallosRedSeguidos++;
+                if (_serverOnline && !_avisoOfflineTimer) {
+                    _avisoOfflineTimer = setTimeout(function () {
+                        _avisoOfflineTimer = null;
+                        fetch(API + '/health', { cache: 'no-store' }).then(function (r) {
+                            if (!r.ok) throw new Error('health ' + r.status);
+                            _fallosRedSeguidos = 0; // el servidor está vivo: fue un hipo
+                        }).catch(function () {
+                            if (_serverOnline && _fallosRedSeguidos >= 1) {
+                                _serverOnline = false;
+                                _mostrarBannerOffline();
+                                showToast('❌ No se puede conectar con el servidor', 'error', 6000);
+                            }
+                        });
+                    }, 2500);
                 }
                 throw networkErr;
             }
@@ -8913,65 +8931,280 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             if (txt) txt.textContent = texto || estado;
         }
 
-        function recargarWebView() {
-            const wv = document.getElementById('wa-webview');
-            if (!wv) {
-                if (typeof window.abrirWebViewWhatsApp === 'function') window.abrirWebViewWhatsApp();
-                return;
+        // ══════════════════════════════════════════════════════════════════════════
+        // WhatsApp Web embebido — gestor de ciclo de vida
+        // Un solo <webview> con partición persistente (el QR se escanea una vez).
+        // Se monta al entrar al módulo y se libera al salir (con 60 s de gracia).
+        // Si el renderer invitado se cae, se recrea SOLO el webview: nunca se
+        // recarga la ventana ni se pierde la conexión con el servidor.
+        // ══════════════════════════════════════════════════════════════════════════
+        const WAEmbed = (function () {
+            const PARTITION = 'persist:whatsapp';
+            const URL_WA = 'https://web.whatsapp.com';
+            // WhatsApp Web bloquea navegadores que detecta como "Electron".
+            // Este UA es un Chrome limpio y coherente con el Chromium de Electron 28.
+            const UA_CHROME = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+            const MAX_REINTENTOS = 2;
+            const ESPERA_SUSPENDER = 60000;
+
+            let wv = null;
+            let estado = 'idle';       // idle | loading | ready | error | suspended
+            let intentos = 0;
+            let timerRetry = null;
+            let timerSuspender = null;
+            let ultimoCrash = 0;
+            let reintentando = false;
+
+            function _host() { return document.getElementById('wa-webview-container'); }
+
+            // Refleja el estado del embed en el encabezado del módulo (si está).
+            function _avisarEstado() {
+                try { if (typeof window._waEmbedEstadoUI === 'function') window._waEmbedEstadoUI(estado); } catch (_) { }
             }
-            wv.reload();
-            showToast('🔄 Recargando WhatsApp Web...', 'info');
+
+            function _htmlOverlay(html) {
+                const h = _host();
+                if (!h) return null;
+                let o = document.getElementById('wa-embed-overlay');
+                if (!o) {
+                    o = document.createElement('div');
+                    o.id = 'wa-embed-overlay';
+                    o.style.cssText = 'position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;color:#94a3b8;background:radial-gradient(circle at 50% 15%,#16303c,#0b141a 72%);';
+                    h.appendChild(o);
+                }
+                o.innerHTML = html;
+                return o;
+            }
+
+            function _quitarOverlay() {
+                const o = document.getElementById('wa-embed-overlay');
+                if (o) o.remove();
+            }
+
+            function _loading(texto) {
+                estado = 'loading';
+                _avisarEstado();
+                _htmlOverlay(
+                    '<div style="font-size:1.6rem;">⏳</div>' +
+                    '<div style="font-weight:700;color:#e2e8f0;font-size:.95rem;">Cargando WhatsApp Web…</div>' +
+                    '<div style="font-size:.75rem;max-width:380px;">' + (texto || 'La primera vez puede tardar unos segundos.') + '</div>'
+                );
+            }
+
+            function _botones() {
+                return '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:4px;">' +
+                    '<button onclick="WAEmbed.retry()" style="padding:8px 14px;background:#25d366;color:#06210f;border:none;border-radius:8px;font-weight:700;cursor:pointer;">Reintentar</button>' +
+                    '<button onclick="WAEmbed.openExternal()" style="padding:8px 14px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:8px;cursor:pointer;">Abrir en navegador</button>' +
+                    '</div>';
+            }
+
+            function _error(titulo, detalle) {
+                estado = 'error';
+                _avisarEstado();
+                _htmlOverlay(
+                    '<div style="font-size:1.6rem;">⚠️</div>' +
+                    '<div style="font-weight:700;color:#e2e8f0;font-size:.95rem;">' + titulo + '</div>' +
+                    '<div style="font-size:.75rem;max-width:420px;line-height:1.5;">' + (detalle || '') + '</div>' +
+                    _botones()
+                );
+            }
+
+            function _quitarWebview() {
+                if (wv) { try { wv.remove(); } catch (_) {} wv = null; }
+            }
+
+            function _crear() {
+                const h = _host();
+                if (!h) return;
+                if (wv && wv.isConnected) return;
+                _quitarWebview();
+                _loading();
+
+                const w = document.createElement('webview');
+                w.id = 'wa-webview';
+                w.setAttribute('partition', PARTITION);
+                w.setAttribute('src', URL_WA);
+                w.setAttribute('useragent', UA_CHROME);
+                // El guest corre sin Node, aislado y en sandbox. main.js vuelve a
+                // imponer estas opciones en will-attach-webview.
+                w.setAttribute('webpreferences', 'contextIsolation=yes,sandbox=yes,nodeIntegration=no');
+                w.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;background:#0b141a;';
+
+                w.addEventListener('did-start-loading', function () {
+                    // No pisar el cartel de "Reconectando"/"Recargando" si ya hay uno.
+                    if (!reintentando && estado !== 'ready' && !document.getElementById('wa-embed-overlay')) _loading();
+                });
+                w.addEventListener('did-finish-load', function () {
+                    estado = 'ready';
+                    intentos = 0;
+                    reintentando = false;
+                    _avisarEstado();
+                    _quitarOverlay();
+                });
+                w.addEventListener('did-fail-load', function (e) {
+                    if (e.isMainFrame === false) return;
+                    if (e.errorCode === -3) return; // ABORTED: recarga/navegación normal
+                    _error('No se pudo cargar WhatsApp Web',
+                        'Código ' + e.errorCode + ': ' + (e.errorDescription || 'error de red') +
+                        '<br>Revisá la conexión a Internet o el proxy de la empresa.');
+                });
+                const alCaer = function (ev) {
+                    if (wv !== w) return; // evento de un webview viejo ya reemplazado
+                    _crash(ev && ev.detail ? ev.detail : {});
+                };
+                w.addEventListener('render-process-gone', alCaer);
+                w.addEventListener('crashed', alCaer);
+                w.addEventListener('new-window', function (e) {
+                    e.preventDefault();
+                    const url = e.url || '';
+                    if (!/^https:\/\//i.test(url)) return;
+                    if (/^https:\/\/(web\.whatsapp\.com|wa\.me)\//i.test(url)) WAEmbed.openExternal(url);
+                    else if (window.electronAPI && window.electronAPI.invoke) window.electronAPI.invoke('abrir-enlace-externo', url);
+                });
+
+                h.appendChild(w);
+                wv = w;
+            }
+
+            function _crash(detalle) {
+                if (!wv) return;
+                // clean-exit es el cierre normal al desmontar el webview: no es
+                // una caída y no debe disparar una reconexión.
+                if (detalle && detalle.reason === 'clean-exit') return;
+                const ahora = Date.now();
+                if (ahora - ultimoCrash < 2000) return; // IPC + evento DOM duplicados
+                ultimoCrash = ahora;
+                console.warn('[WA Web] Renderer caído:', detalle);
+                _quitarWebview();
+                clearTimeout(timerRetry);
+                if (intentos < MAX_REINTENTOS) {
+                    intentos++;
+                    reintentando = true;
+                    _loading('WhatsApp Web se cerró. Reconectando (intento ' + intentos + '/' + MAX_REINTENTOS + ')…');
+                    timerRetry = setTimeout(_crear, 2000 * intentos);
+                } else {
+                    _error('WhatsApp Web se cerró varias veces',
+                        'Puede ser falta de memoria o un problema gráfico. Probá de nuevo o usá el navegador.');
+                }
+            }
+
+            return {
+                mount: function () {
+                    clearTimeout(timerSuspender); timerSuspender = null;
+                    const h = _host();
+                    if (!h) return;
+                    h.style.position = 'relative';
+                    if (wv && wv.isConnected) { _quitarOverlay(); return; }
+                    if (estado === 'loading') return;
+                    _crear();
+                },
+                suspend: function () {
+                    if (!wv) return;
+                    clearTimeout(timerSuspender);
+                    timerSuspender = setTimeout(function () {
+                        timerSuspender = null;
+                        _quitarWebview();
+                        _quitarOverlay();
+                        estado = 'suspended';
+                        _avisarEstado();
+                    }, ESPERA_SUSPENDER);
+                },
+                reload: function () {
+                    clearTimeout(timerRetry);
+                    intentos = 0;
+                    reintentando = false;
+                    if (wv && wv.isConnected) {
+                        _loading('Recargando WhatsApp Web…');
+                        try { wv.reload(); } catch (_) { _quitarWebview(); _crear(); }
+                        return;
+                    }
+                    _crear();
+                },
+                retry: function () {
+                    clearTimeout(timerRetry);
+                    intentos = 0;
+                    reintentando = false;
+                    _quitarWebview();
+                    _crear();
+                },
+                clearSession: async function () {
+                    if (!confirm('¿Cerrar la sesión del WhatsApp Web embebido? Vas a tener que escanear el QR de nuevo.')) return;
+                    clearTimeout(timerRetry);
+                    intentos = 0;
+                    reintentando = false;
+                    _quitarWebview();
+                    try {
+                        if (window.electronAPI && window.electronAPI.invoke) {
+                            await window.electronAPI.invoke('wa-embed-clear-session');
+                        }
+                        showToast('✅ Sesión de WhatsApp Web borrada. Escaneá el QR de nuevo.', 'success');
+                    } catch (e) {
+                        showToast('❌ No se pudo borrar la sesión: ' + (e.message || e), 'error');
+                    }
+                    _crear();
+                },
+                openExternal: function (url) {
+                    try {
+                        if (window.electronAPI && window.electronAPI.invoke) {
+                            window.electronAPI.invoke('abrir-whatsapp-web', url || URL_WA);
+                            showToast('🌐 Abriendo WhatsApp Web en el navegador…', 'info');
+                            return;
+                        }
+                    } catch (_) { }
+                    window.open(url || URL_WA, '_blank');
+                },
+                // Inserta una plantilla en el cuadro de mensaje del chat abierto.
+                // No envía: el usuario revisa y presiona Enter (más seguro).
+                insertarTexto: function (texto) {
+                    if (!wv || !wv.isConnected) return Promise.reject(new Error('WhatsApp Web no está abierto'));
+                    const js = '(function(){' +
+                        'try{' +
+                        'var el=document.querySelector(\'footer div[contenteditable="true"]\')||document.querySelector(\'div[contenteditable="true"][data-tab="10"]\')||document.querySelector(\'div[contenteditable="true"]\');' +
+                        'if(!el)return "no-input";' +
+                        'el.focus();' +
+                        'var sel=window.getSelection();var r=document.createRange();r.selectNodeContents(el);sel.removeAllRanges();sel.addRange(r);' +
+                        'document.execCommand("delete");' +
+                        'document.execCommand("insertText",false,' + JSON.stringify(String(texto)) + ');' +
+                        'return "ok";' +
+                        '}catch(e){return "err:"+e.message;}' +
+                        '})();';
+                    return wv.executeJavaScript(js);
+                },
+                state: function () { return estado; },
+                _crash: _crash
+            };
+        })();
+        window.WAEmbed = WAEmbed;
+
+        // main.js avisa cuando el renderer del webview se cae (fuente confiable).
+        if (window.electronAPI && typeof window.electronAPI.on === 'function') {
+            window.electronAPI.on('wa-embed-gone', function (detalle) {
+                WAEmbed._crash(detalle || {});
+            });
+        }
+
+        function recargarWebView() {
+            if (typeof WAEmbed !== 'undefined') WAEmbed.reload();
         }
 
         function borrarSesionWhatsApp() {
-            if (!confirm('¿Cerrar sesión de WhatsApp Web? Se borrarán los datos locales.')) return;
-            const wv = document.getElementById('wa-webview');
-            if (!wv) return;
-            showToast('🗑 Cerrando sesión de WhatsApp Web...', 'info');
-            try {
-                wv.executeJavaScript(`
-            try {
-                localStorage.clear();
-                sessionStorage.clear();
-                indexedDB.databases().then(function(dbs) {
-                    dbs.forEach(function(db) { indexedDB.deleteDatabase(db.name); });
-                });
-            } catch(e) {}
-            document.cookie.split(';').forEach(function(c) {
-                document.cookie = c.trim().split('=')[0] + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
-            });
-        `);
-            } catch (e) { }
-            wv.src = 'about:blank';
-            setTimeout(() => {
-                try { wv.clearData({ storages: ['cookies', 'localstorage', 'indexeddb', 'serviceworkers', 'cachestorage', 'websql'] }); } catch (e) { }
-                setTimeout(() => {
-                    wv.src = 'https://web.whatsapp.com';
-                    showToast('✅ Sesión borrada. Escaneá el QR de nuevo.', 'info');
-                }, 500);
-            }, 500);
+            if (typeof WAEmbed !== 'undefined') { WAEmbed.clearSession(); return; }
+            showToast('Usá Ajustes → Chatbot → Borrar sesión', 'info');
         }
 
         async function abrirWAWebView(telefono, mensaje) {
             var url = 'https://web.whatsapp.com/send?phone=' + String(telefono || '').replace(/\D/g, '');
             if (mensaje) url += '&text=' + encodeURIComponent(mensaje);
             try {
-                await nav('chatbot');
-                var wv = await new Promise(function (resolve) {
-                    var interval = setInterval(function () {
-                        var el = document.getElementById('wa-webview');
-                        if (el) { clearInterval(interval); resolve(el); }
-                    }, 200);
-                    setTimeout(function () { clearInterval(interval); resolve(null); }, 8000);
-                });
-                if (wv && wv.loadURL) {
-                    wv.loadURL(url);
-                    showToast('📩 Abriendo chat...', 'info');
+                if (window.electronAPI && window.electronAPI.invoke) {
+                    await window.electronAPI.invoke('abrir-whatsapp-web', url);
                 } else {
-                    console.warn('Webview no disponible');
+                    window.open(url, '_blank');
                 }
+                showToast('📩 Abriendo chat en el navegador…', 'info');
             } catch (e) {
-                console.error('Error al abrir webview:', e);
+                console.error('Error al abrir WhatsApp Web:', e);
+                showToast('❌ No se pudo abrir el navegador', 'error');
             }
         }
 
@@ -9057,8 +9290,8 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             }
 
             _waEstado = 'LISTO';
-            const dotColor = '#10b981';
-            const statusTexto = 'Disponible';
+            const dotColor = '#eab308';
+            const statusTexto = 'Cargando WhatsApp Web…';
             const activas30min = conversaciones.filter(c => {
                 const diff = (new Date() - new Date(c.fecha_ultimo)) / 60000;
                 return diff < 30;
@@ -9109,7 +9342,8 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
         <!-- Info simplificada + estado IA -->
         <div id="wa-connected-info" style="margin-top:12px; display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
             <div style="font-size:0.75rem; color:var(--text-muted);">
-                WhatsApp Web cargado abajo. Escaneá el QR con tu teléfono para vincular.
+                WhatsApp Web embebido. Si es la primera vez, escaneá el QR que muestra el panel.
+                Es una sesión independiente del bot automático (el QR del bot está en Ajustes → Chatbot).
             </div>
             <div style="display:flex; align-items:center; gap:6px; font-size:0.7rem; color:var(--text-muted); margin-left:auto;">
                 <span id="ai-status-dot" style="width:8px;height:8px;border-radius:50%;background:#64748b;display:inline-block;"></span>
@@ -9171,30 +9405,21 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
       <div id="plantillas-barra-botones" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
     </div>
 
-    <!-- WhatsApp Web embebido dentro del módulo (como en versiones anteriores) -->
-    <div id="wa-webview-container" style="flex:1; display:flex; flex-direction:column; position:relative; min-height:0;"></div>
+    <!-- QR del bot automático: tarjeta plegable (no flota sobre WhatsApp Web) -->
+    <details id="wa-bot-qr-slot" style="display:none; margin-bottom:10px; background:var(--panel); border:1px solid var(--accent); border-left:4px solid #eab308; border-radius:10px; padding:10px 14px;"></details>
+
+    <!-- WhatsApp Web embebido (misma experiencia que WhatsApp Web, dentro del
+         módulo). WAEmbed maneja carga, recarga y recuperación ante caídas. -->
+    <div id="wa-webview-container" role="region" aria-label="WhatsApp Web embebido"
+         style="flex:1; display:flex; flex-direction:column; position:relative; min-height:440px; border:1px solid var(--accent); border-radius:14px; overflow:hidden; background:#0b141a; box-shadow:0 10px 30px rgba(0,0,0,.25);"></div>
 
     </div><!-- fin wa-panel -->`;
 
-            // WhatsApp Web embebido en el módulo, como en las versiones anteriores.
-            window.abrirWebViewWhatsApp = function () {
-                const container = document.getElementById('wa-webview-container');
-                if (!container) return;
-                if (document.getElementById('wa-webview')) return;
-                container.innerHTML = '';
-                const wv = document.createElement('webview');
-                wv.id = 'wa-webview';
-                wv.setAttribute('partition', 'persist:whatsapp');
-                wv.setAttribute('src', 'https://web.whatsapp.com');
-                wv.setAttribute('useragent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36');
-                wv.setAttribute('allowpopups', '');
-                wv.style.cssText = 'flex:1; border:none; height:100%; width:100%;';
-                wv.addEventListener('did-fail-load', function (e) {
-                    if (e.errorCode === -2 && e.validatedURL === 'about:blank') return;
-                    console.warn('[WebView] did-fail-load:', e.errorCode, e.errorDescription, e.validatedURL);
-                });
-                container.appendChild(wv);
-                _arrancarMonitor(wv);
+            // Respaldo: abrir WhatsApp Web en el navegador del sistema si el
+            // webview no puede cargar (WAEmbed lo usa desde el cartel de error).
+            window.abrirWebViewWhatsApp = function (url) {
+                if (typeof WAEmbed !== 'undefined') { WAEmbed.openExternal(url); return; }
+                window.open(url || 'https://web.whatsapp.com', '_blank');
             };
             // ── Monitor de mensajes entrantes (solo se usa si hubiera webview;
             // se conserva por compatibilidad, ya no se arranca) ──
@@ -9245,30 +9470,39 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                 }
             }
 
-            // ── Helper: polling consciente de visibilidad ──────────────────
-            function crearPoll(fn, ms) {
-                var id = null;
-                var tick = function () { if (!document.hidden) fn(); };
-                var start = function () { if (!id) id = setInterval(tick, ms); };
-                var stop = function () { if (id) { clearInterval(id); id = null; } };
-                document.addEventListener('visibilitychange', function () { document.hidden ? stop() : start(); });
-                start();
-                return { stop: stop, start: start };
-            }
+            // ── Polling consciente de visibilidad ──────────────────────────
+            // (crearPoll está definido a nivel superior, junto a _chequearBotQR)
 
             // Verificar estado de IA y refrescar cada 60s
             verificarAI();
-            if (window._aiCheckInterval) clearInterval(window._aiCheckInterval);
+            if (window._aiCheckInterval && window._aiCheckInterval.stop) window._aiCheckInterval.stop();
             window._aiCheckInterval = crearPoll(verificarAI, 60000);
 
             // Poll estado del bot automático al cargar
             _chequearBotQR();
 
-            // Cargar WhatsApp Web embebido al entrar al módulo (como antes)
-            try { window.abrirWebViewWhatsApp(); } catch (e) { console.warn('No se pudo abrir WhatsApp Web:', e); }
+            // Estado del WhatsApp Web embebido en el encabezado del módulo.
+            window._waEmbedEstadoUI = function (est) {
+                var txt = document.getElementById('wa-status-text');
+                var dot = document.getElementById('wa-status-dot');
+                var cfg = {
+                    loading:   ['Cargando WhatsApp Web…', '#eab308'],
+                    ready:     ['WhatsApp Web cargado', '#3b82f6'],
+                    error:     ['Error al cargar WhatsApp Web', '#ef4444'],
+                    suspended: ['WhatsApp Web en pausa', '#64748b'],
+                    idle:      ['WhatsApp Web', '#64748b']
+                }[est] || ['WhatsApp Web', '#64748b'];
+                if (txt) txt.textContent = cfg[0];
+                if (dot) dot.style.background = cfg[1];
+            };
+            window._waEmbedEstadoUI(WAEmbed.state());
+
+            // WhatsApp Web embebido: se monta después de pintar el panel para
+            // que la interfaz no se congele mientras Chromium crea el invitado.
+            setTimeout(function () { try { WAEmbed.mount(); } catch (e) { console.warn('[WA Web] No se pudo montar:', e); } }, 120);
 
             // Refrescar métricas cada 30 segundos
-            if (window._metricsInterval) clearInterval(window._metricsInterval);
+            if (window._metricsInterval && window._metricsInterval.stop) window._metricsInterval.stop();
             window._metricsInterval = crearPoll(async function () {
                 try {
                     const [convRes, consRes] = await Promise.all([
@@ -9290,7 +9524,7 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                         badge.style.display = consRes.length ? '' : 'none';
                     }
                 } catch (e) { }
-            });
+            }, 30000);
         }
 
         // ── Estado IA ─────────────────────────────────────────────────────────────────
@@ -9327,6 +9561,36 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
         }
 
         // ── Bot QR — chequea el QR del bot automático ──────────────────────────────
+        // crearPoll vive acá (scope del script) porque lo usan tanto el panel del
+        // módulo como _chequearBotQR, que también se llama desde Ajustes → Chatbot.
+        // Antes estaba dentro de renderChatbotAdmin y _chequearBotQR lanzaba
+        // "ReferenceError: crearPoll is not defined" al abrir el módulo.
+        function crearPoll(fn, ms) {
+            // Blindaje: si falta el intervalo (bug histórico) o es inválido, usar
+            // 30 s. Con ms=undefined, setInterval(tick, undefined) dispara en loop
+            // y satura la red del renderer (ERR_INSUFFICIENT_RESOURCES).
+            ms = Number(ms);
+            if (!isFinite(ms) || ms < 1000) ms = 30000;
+
+            var id = null;
+            var tick = function () { if (!document.hidden) fn(); };
+            var start = function () { if (!id) id = setInterval(tick, ms); };
+            var stop = function () { if (id) { clearInterval(id); id = null; } };
+            var poll = { stop: stop, start: start };
+
+            _pollsActivos.add(poll);
+            if (!_pollsVisibilidad) {
+                _pollsVisibilidad = true;
+                document.addEventListener('visibilitychange', function () {
+                    _pollsActivos.forEach(function (p) { document.hidden ? p.stop() : p.start(); });
+                });
+            }
+            start();
+            return poll;
+        }
+        const _pollsActivos = new Set();
+        let _pollsVisibilidad = false;
+
         let _botQrInterval = null;
         let _chatbotActivoCfg = false;
 
@@ -9336,18 +9600,28 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                     apiFetch(`${API}/wa-bot/qr`).then(r => r.json()).catch(() => ({})),
                     apiFetch(`${API}/chatbot/config`).then(r => r.json()).catch(() => ({}))
                 ]);
-                _chatbotActivoCfg = cfgRes.chatbot_activo === '1';
+                // Si la config no llegó (por ejemplo, todavía no hay token al
+                // arrancar), no pisar el estado con false: eso ocultaba el QR.
+                if (cfgRes && typeof cfgRes.chatbot_activo !== 'undefined') {
+                    _chatbotActivoCfg = cfgRes.chatbot_activo === '1';
+                }
                 console.log('[WA Bot QR] Estado - activo:' + _chatbotActivoCfg + ' qr:' + (qrRes.qr ? 'si' : 'no') + ' conectado:' + qrRes.conectado + ' need_qr:' + qrRes.need_qr);
                 _actualizarBotQRUI(qrRes);
             } catch (e) { console.warn('[WA Bot QR] Error inicial:', e); }
-            if (_botQrInterval) _botQrInterval.stop();
+
+            // Un solo polling: _chequearBotQR se llama desde el módulo y desde
+            // Ajustes → Chatbot. Antes cada llamada dejaba un intervalo más y
+            // los QR se pisaban entre sí.
+            if (_botQrInterval) return;
             _botQrInterval = crearPoll(async () => {
                 try {
                     const [qrRes, cfgRes] = await Promise.all([
                         apiFetch(`${API}/wa-bot/qr`).then(r => r.json()).catch(() => ({})),
                         apiFetch(`${API}/chatbot/config`).then(r => r.json()).catch(() => ({}))
                     ]);
-                    _chatbotActivoCfg = cfgRes.chatbot_activo === '1';
+                    if (cfgRes && typeof cfgRes.chatbot_activo !== 'undefined') {
+                        _chatbotActivoCfg = cfgRes.chatbot_activo === '1';
+                    }
                     console.log('[WA Bot QR] Poll - activo:' + _chatbotActivoCfg + ' qr:' + (qrRes.qr ? 'si' : 'no'));
                     _actualizarBotQRUI(qrRes);
                 } catch (e) { }
@@ -9357,8 +9631,12 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
         function _actualizarBotQRUI(data) {
             var popup = document.getElementById('bot-qr-popup');
             var badge = document.getElementById('cfg-bot-status');
+            var slot = document.getElementById('wa-bot-qr-slot');
+            // El slot vive en el módulo; en Ajustes → Chatbot se usa el popup.
+            var enModulo = !!(document.getElementById('chatbot-container') && document.getElementById('chatbot-container').style.display !== 'none');
             if (!_chatbotActivoCfg) {
                 if (popup) { popup.style.display = 'none'; popup.remove(); }
+                if (slot) { slot.style.display = 'none'; slot.open = false; slot.innerHTML = ''; }
                 var cm = document.getElementById('bot-connected-msg');
                 if (cm) cm.style.display = 'none';
                 if (badge) { badge.style.color = ''; badge.style.background = ''; badge.className = 'cfg-status-indicator cfg-status-off'; badge.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block;"></span> CHATBOT INACTIVO'; }
@@ -9366,13 +9644,28 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             }
             if (data.conectado) {
                 if (popup) { popup.style.display = 'none'; popup.remove(); }
+                if (slot) { slot.style.display = 'none'; slot.open = false; slot.innerHTML = ''; }
                 var cm = document.getElementById('bot-connected-msg');
                 if (cm) cm.style.display = 'block';
                 if (badge) { badge.style.color = ''; badge.style.background = ''; badge.className = 'cfg-status-indicator cfg-status-on'; badge.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block;"></span> CHATBOT CONECTADO'; }
                 return;
             }
             if (data.qr) {
-                if (!popup) {
+                if (slot && enModulo) {
+                    // En el módulo el QR del bot va en una tarjeta plegable para
+                    // no tapar el WhatsApp Web embebido.
+                    var estabaAbierto = !!slot.open;
+                    slot.style.display = 'block';
+                    slot.innerHTML = '<summary style="cursor:pointer;font-weight:700;color:var(--text);font-size:.82rem;">🤖 Bot automático sin vincular — ver QR</summary>' +
+                        '<div style="display:flex;gap:14px;align-items:center;margin-top:10px;flex-wrap:wrap;">' +
+                        '<img src="' + data.qr + '" alt="QR del bot" style="width:110px;height:110px;background:#fff;border-radius:8px;padding:4px;">' +
+                        '<div style="flex:1;min-width:180px;font-size:.72rem;color:var(--text-muted);line-height:1.5;">' +
+                        'Escaneá este QR desde WhatsApp → <b>Dispositivos vinculados</b> para que el bot responda solo.<br>' +
+                        'Es una sesión independiente del WhatsApp Web de abajo.' +
+                        '</div></div>';
+                    slot.open = estabaAbierto;
+                    if (popup) { popup.style.display = 'none'; popup.remove(); popup = null; }
+                } else if (!popup) {
                     popup = document.createElement('div');
                     popup.id = 'bot-qr-popup';
                     popup.style.cssText = 'position:fixed;top:10px;right:10px;z-index:99999;text-align:center;padding:20px;background:#1e293b;border:2px solid #334155;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.5);';
@@ -9381,7 +9674,7 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                 }
                 var cont = document.getElementById('bot-qr-flotante');
                 if (cont) cont.innerHTML = '<img src="' + data.qr + '" style="width:220px;height:220px;border-radius:8px;" />';
-                popup.style.display = 'block';
+                if (popup) popup.style.display = 'block';
                 if (badge) { badge.className = 'cfg-status-indicator'; badge.style.color = '#eab308'; badge.style.background = 'rgba(234,179,8,0.15)'; badge.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:#eab308;display:inline-block;"></span> ESCANEAR QR'; }
             } else if (data.error) {
                 if (popup) { popup.style.display = 'none'; popup.remove(); }
@@ -9555,7 +9848,8 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
         function renderConversacionesRecientes(c) { return ''; }
 
         // Modificar la función nav para incluir chatbot
-        // Preserva el webview entre navegaciones (no lo destruye al cambiar de pestaña)
+        // El webview se conserva al cambiar de pestaña y se libera a los 60 s
+        // fuera del módulo (WAEmbed.suspend), para no ocupar ~500 MB de más.
         const originalNav = nav;
         let _chatbotRendered = false;
         nav = async function (v) {
@@ -9579,9 +9873,11 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                 }
                 contentArea.style.display = 'none';
                 chatbotContainer.style.display = 'flex';
+                try { WAEmbed.mount(); } catch (_) { }
                 document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
                 document.getElementById('btn-chatbot').classList.add('active');
             } else {
+                try { WAEmbed.suspend(); } catch (_) { }
                 chatbotContainer.style.display = 'none';
                 contentArea.style.display = '';
                 originalNav(v);
@@ -12720,37 +13016,23 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             window.toggleConsultas = toggleConsultas;
 
             function enviarPlantilla(texto) {
-                var wv = document.getElementById('wa-webview');
-                if (!wv || !wv.executeJavaScript) {
-                    try { navigator.clipboard.writeText(texto); showToast('📋 Plantilla copiada. Pegala en WhatsApp Web.', 'success'); } catch (e) { }
+                function copiar() {
+                    try {
+                        navigator.clipboard.writeText(texto)
+                            .then(function () { showToast('📋 Plantilla copiada. Pegala en WhatsApp Web.', 'success'); })
+                            .catch(function () { showToast('📋 Copiá la plantilla manualmente desde Ajustes → IA.', 'warning'); });
+                    } catch (e) { showToast('No se pudo copiar la plantilla', 'error'); }
+                }
+                // Si el WhatsApp Web embebido está listo, se inserta en el chat abierto.
+                if (typeof WAEmbed !== 'undefined' && WAEmbed.state() === 'ready') {
+                    WAEmbed.insertarTexto(texto).then(function (r) {
+                        if (r === 'ok') showToast('📋 Plantilla insertada. Presioná Enter para enviar.', 'success');
+                        else if (r === 'no-input') { copiar(); showToast('Abrí un chat y reintentá. Plantilla copiada.', 'warning'); }
+                        else showToast('⚠️ WhatsApp: ' + r, 'warning');
+                    }).catch(function () { copiar(); });
                     return;
                 }
-                var js = [
-                    '(function(){',
-                    '  try {',
-                    '    var inp = document.querySelector(\'div[contenteditable="true"]\');',
-                    '    if (!inp) return "no-input";',
-                    '    inp.focus();',
-                    '    var text = ' + JSON.stringify(texto) + ';',
-                    '    document.execCommand("selectAll");',
-                    '    document.execCommand("insertText", false, text);',
-                    '    setTimeout(function() {',
-                    '      var btn = document.querySelector(\'button[aria-label="Enviar"],button[aria-label="Send"],button[data-testid="compose-btn-send"],footer button:last-child\');',
-                    '      if (btn) { btn.click(); return "sent"; }',
-                    '      var spans = document.querySelectorAll(\'button span[data-icon="send"]\');',
-                    '      for (var i=0;i<spans.length;i++) { var b=spans[i].closest("button"); if(b){b.click();return "sent";} }',
-                    '      return "no-btn";',
-                    '    }, 600);',
-                    '    return "ok";',
-                    '  } catch(e) { return "err:"+e.message; }',
-                    '})();'
-                ].join('\n');
-                wv.executeJavaScript(js).then(function (r) {
-                    if (r && r !== 'ok' && r !== 'sent') showToast('⚠️ WhatsApp: ' + r + '. Probá pegarlo manualmente.', 'warning');
-                    else showToast('✅ Plantilla enviada', 'success');
-                }).catch(function (err) {
-                    showToast('❌ Error: ' + (err.message || err), 'error');
-                });
+                copiar();
             }
             window.enviarPlantilla = enviarPlantilla;
 
