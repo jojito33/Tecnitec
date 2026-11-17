@@ -9323,6 +9323,10 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                     style="padding:10px 14px; background:var(--whatsapp); color:white; border:none; border-radius:10px; cursor:pointer; font-weight:bold; font-size:0.85rem;">
                     🔄
                 </button>
+                <button onclick="abrirQRBot()" title="Ver el QR para vincular el bot automático"
+                    style="display:inline-flex; align-items:center; gap:6px; padding:10px 14px; background:#b45309; color:white; border:none; border-radius:10px; cursor:pointer; font-weight:bold; font-size:0.85rem;">
+                    🤖 <span style="font-size:0.75rem;">QR bot</span>
+                </button>
                 <button onclick="togglePlantillasBarra()" title="Plantillas de respuesta rápida"
                     style="display:inline-flex; align-items:center; gap:6px; padding:10px 14px; background:var(--accent); color:var(--text); border:1px solid #334155; border-radius:10px; cursor:pointer; font-weight:bold; font-size:0.85rem;">
                     📋 <span style="font-size:0.75rem;">Plantillas</span>
@@ -9342,8 +9346,8 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
         <!-- Info simplificada + estado IA -->
         <div id="wa-connected-info" style="margin-top:12px; display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
             <div style="font-size:0.75rem; color:var(--text-muted);">
-                WhatsApp Web embebido. Si es la primera vez, escaneá el QR que muestra el panel.
-                Es una sesión independiente del bot automático (el QR del bot está en Ajustes → Chatbot).
+                WhatsApp Web embebido (vista). El QR grande de abajo vincula <b>esta vista</b>, no el bot.
+                Para el bot automático usá <b>🤖 QR bot</b>.
             </div>
             <div style="display:flex; align-items:center; gap:6px; font-size:0.7rem; color:var(--text-muted); margin-left:auto;">
                 <span id="ai-status-dot" style="width:8px;height:8px;border-radius:50%;background:#64748b;display:inline-block;"></span>
@@ -9625,7 +9629,7 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                     console.log('[WA Bot QR] Poll - activo:' + _chatbotActivoCfg + ' qr:' + (qrRes.qr ? 'si' : 'no'));
                     _actualizarBotQRUI(qrRes);
                 } catch (e) { }
-            }, 20000);
+            }, 5000); // el QR de WhatsApp rota cada ~20 s; refrescar cada 5 s evita escanear uno vencido
         }
 
         function _actualizarBotQRUI(data) {
@@ -9656,14 +9660,22 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                     // no tapar el WhatsApp Web embebido.
                     var estabaAbierto = !!slot.open;
                     slot.style.display = 'block';
-                    slot.innerHTML = '<summary style="cursor:pointer;font-weight:700;color:var(--text);font-size:.82rem;">🤖 Bot automático sin vincular — ver QR</summary>' +
+                    slot.innerHTML = '<summary style="cursor:pointer;font-weight:700;color:var(--text);font-size:.82rem;">🤖 Vincular el BOT automático — ver QR (no es el WhatsApp Web de abajo)</summary>' +
                         '<div style="display:flex;gap:14px;align-items:center;margin-top:10px;flex-wrap:wrap;">' +
-                        '<img src="' + data.qr + '" alt="QR del bot" style="width:110px;height:110px;background:#fff;border-radius:8px;padding:4px;">' +
-                        '<div style="flex:1;min-width:180px;font-size:.72rem;color:var(--text-muted);line-height:1.5;">' +
+                        '<img src="' + data.qr + '" alt="QR del bot automático" style="width:110px;height:110px;background:#fff;border-radius:8px;padding:4px;">' +
+                        '<div style="flex:1;min-width:200px;font-size:.72rem;color:var(--text-muted);line-height:1.55;">' +
                         'Escaneá este QR desde WhatsApp → <b>Dispositivos vinculados</b> para que el bot responda solo.<br>' +
-                        'Es una sesión independiente del WhatsApp Web de abajo.' +
-                        '</div></div>';
-                    slot.open = estabaAbierto;
+                        'Es una sesión independiente del WhatsApp Web de abajo.<br>' +
+                        '<span style="color:#fbbf24;">Si WhatsApp dice “No se pudo vincular el dispositivo”:</span> tocá <b>Reiniciar vinculación</b>, esperá el QR nuevo y escanealo dentro de los 20 segundos.<br>' +
+                        'Si sigue fallando, revisá en el teléfono <b>Dispositivos vinculados</b> y eliminá sesiones viejas (el máximo es 4).' +
+                        '</div></div>' +
+                        '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">' +
+                        '<button onclick="resetBotWA()" style="padding:7px 12px;background:#b45309;color:white;border:none;border-radius:8px;cursor:pointer;font-size:.72rem;font-weight:700;">🔄 Reiniciar vinculación</button>' +
+                        '</div>';
+                    // La primera vez se abre sola, para que no se escanee por error
+                    // el QR de WhatsApp Web embebido.
+                    if (slot.dataset.iniciado !== '1') { slot.open = true; slot.dataset.iniciado = '1'; }
+                    else slot.open = estabaAbierto;
                     if (popup) { popup.style.display = 'none'; popup.remove(); popup = null; }
                 } else if (!popup) {
                     popup = document.createElement('div');
@@ -9714,7 +9726,7 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
 
         function resetBotWA() {
             cerrarAvisoBotWA();
-            if (!confirm('Se va a borrar la sesión de WhatsApp y vas a tener que escanear el QR de nuevo. ¿Continuar?')) return;
+            if (!confirm('Se va a borrar la sesión del BOT automático y vas a tener que escanear el QR de nuevo. ¿Continuar?')) return;
             apiFetch(`${API}/wa-bot/reset`, { method: 'POST' })
                 .then(() => showToast('🧹 Sesión borrada. Esperá el nuevo QR…', 'info'))
                 .catch(() => showToast('❌ No se pudo borrar la sesión', 'error'));
@@ -9724,6 +9736,18 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             var e = document.getElementById('bot-error-box');
             if (e) e.remove();
         }
+
+        // Lleva al QR del bot automático (el de la tarjeta), no al de WhatsApp Web.
+        function abrirQRBot() {
+            var slot = document.getElementById('wa-bot-qr-slot');
+            if (!slot || slot.style.display === 'none') {
+                showToast('El bot automático ya está conectado o está inactivo.', 'info');
+                return;
+            }
+            slot.open = true;
+            try { slot.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) { }
+        }
+        window.abrirQRBot = abrirQRBot;
 
         // ── Consultas ─────────────────────────────────────────────────────────────────
         function abrirRespuestaConsulta(consultaId, telefono, nombre, descripcion) {

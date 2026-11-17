@@ -2838,6 +2838,33 @@ let _waTimerReintento = null;
 // Reintentos del bot: con espera creciente y con tope, para no quedar en un
 // bucle infinito de "abre Chrome / cierra Chrome" cuando la sesión es inválida.
 const WA_MAX_REINTENTOS = 5;
+// whatsapp-web.js usa por defecto un User-Agent de Chrome 101 (macOS), que
+// WhatsApp Web rechaza al vincular ("No se pudo vincular el dispositivo").
+// Se arma un UA de Chrome de escritorio acorde al Chrome instalado.
+function _waUAChrome(chromePath) {
+    const plantilla = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{v}.0.0.0 Safari/537.36';
+    return new Promise((resolve) => {
+        const terminar = (mayor) => resolve(plantilla.replace('{v}', /^\d+$/.test(String(mayor)) ? String(mayor) : '142'));
+        if (process.platform !== 'win32') return terminar('');
+        try {
+            const { execFile } = require('child_process');
+            // Lectura rápida desde el registro de Chrome.
+            execFile('reg.exe', ['query', 'HKCU\\Software\\Google\\Chrome\\BLBeacon', '/v', 'version'], { timeout: 3000, windowsHide: true }, (err, stdout) => {
+                if (!err) {
+                    const m = String(stdout).match(/version\s+REG_SZ\s+(\d+)\./i);
+                    if (m) return terminar(m[1]);
+                }
+                // Respaldo: versión del archivo chrome.exe.
+                execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+                    `(Get-Item -LiteralPath '${String(chromePath || '').replace(/'/g, "''")}').VersionInfo.ProductVersion`],
+                    { timeout: 5000, windowsHide: true }, (err2, stdout2) => {
+                        const m2 = !err2 && String(stdout2).match(/(\d+)\./);
+                        terminar(m2 ? m2[1] : '');
+                    });
+            });
+        } catch (_) { terminar(''); }
+    });
+}
 const WA_SESION_DIR = path.join(DATA_DIR, 'wa-session');
 
 async function _waDestruirCliente() {
@@ -2970,11 +2997,15 @@ async function _iniciarWABot() {
             return;
         }
 
+        const uaBot = await _waUAChrome(chromePath);
+        logger.info('[WA Bot] User-Agent: ' + uaBot);
+
         waClient = new Client({
             // WhatsApp Web a veces tarda más de 30 s (red lenta, primer arranque,
             // actualización del bundle). El default de la librería es 30 s y
             // provoca "Waiting failed: 30000ms exceeded".
             authTimeoutMs: 180000,
+            userAgent: uaBot,
             puppeteer: {
                 executablePath: chromePath,
                 headless: true,
@@ -3009,6 +3040,23 @@ async function _iniciarWABot() {
             logger.info('[WA Bot] Conectado!');
             try { db.prepare(`UPDATE whatsapp_sesion SET estado='LISTO', conectado_en=datetime('now'), ultima_actividad=datetime('now') WHERE id=1`).run(); } catch(_) {}
             broadcastWS('wa_status', { estado: 'LISTO', conectado: true });
+        });
+        // WhatsApp rechazó la vinculación (QR vencido, navegador no soportado,
+        // límite de dispositivos, etc.). La sesión local queda inservible: se
+        // borra y se muestra un QR nuevo automáticamente.
+        waClient.on('auth_failure', async (msg) => {
+            const motivo = String(msg || 'fallo de autenticación');
+            _waConectado = false;
+            _waError = 'No se pudo vincular el dispositivo: ' + motivo;
+            logger.warn('[WA Bot] auth_failure: ' + motivo);
+            try { db.prepare(`UPDATE whatsapp_sesion SET estado='DESCONECTADO' WHERE id=1`).run(); } catch(_) {}
+            broadcastWS('wa_status', { estado: 'DESCONECTADO', conectado: false, motivo: _waError });
+            _waManejandoDesconexion = true;
+            try { await _waDestruirCliente(); } catch (_) {}
+            _waManejandoDesconexion = false;
+            _waPurgarSesion();
+            _waIniciando = false;
+            _waProgramarReintento('auth_failure: ' + motivo);
         });
         waClient.on('message', async (msg) => {
             try {
@@ -3101,6 +3149,15 @@ async function _iniciarWABot() {
             }
         });
         await waClient.initialize();
+
+        // Diagnóstico: qué UA y qué versión de WhatsApp Web está usando el bot.
+        try {
+            const info = await waClient.pupPage.evaluate(() => ({
+                ua: navigator.userAgent,
+                version: (window.Debug && window.Debug.VERSION) || ''
+            }));
+            logger.info('[WA Bot] Navegador: ' + info.ua + ' | WhatsApp Web: ' + (info.version || '?'));
+        } catch (_) {}
 
         // El Chrome del bot en prioridad baja: que no compita con la interfaz.
         try {
