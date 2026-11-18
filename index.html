@@ -3133,25 +3133,45 @@
     </div>
 
     <script>
-        // API dinámico: usa servidor configurado (local o remoto)
-        function _getAPIBase() {
+        // Config de red: el proceso principal la inyecta en window.__TECNITEC_RED__
+        // y la persiste en tecnitec_red.json. El localStorage queda como respaldo
+        // para cuando la UI corre fuera de Electron.
+        function _redConfig() {
             try {
-                var cfg = JSON.parse(localStorage.getItem('tecnitec_red_config') || '{}');
-                if (cfg.modo === 'cliente' && cfg.host) {
-                    return 'http://' + cfg.host + ':' + (cfg.port || 3000) + '/api';
+                if (window.__TECNITEC_RED__ && typeof window.__TECNITEC_RED__ === 'object') {
+                    return window.__TECNITEC_RED__;
                 }
             } catch (e) { }
+            try { return JSON.parse(localStorage.getItem('tecnitec_red_config') || '{}') || {}; } catch (e) { return {}; }
+        }
+        function _esClienteRemoto() {
+            var cfg = _redConfig();
+            return cfg.modo === 'cliente' && !!cfg.host;
+        }
+        // API dinámico: usa servidor configurado (local o remoto)
+        function _getAPIBase() {
+            var cfg = _redConfig();
+            if (cfg.modo === 'cliente' && cfg.host) {
+                return 'http://' + cfg.host + ':' + (cfg.port || 3000) + '/api';
+            }
             return 'http://127.0.0.1:3000/api';
         }
         function _getWSBase() {
-            try {
-                var cfg = JSON.parse(localStorage.getItem('tecnitec_red_config') || '{}');
-                if (cfg.modo === 'cliente' && cfg.host) {
-                    return 'ws://' + cfg.host + ':' + (cfg.port || 3000);
-                }
-            } catch (e) { }
+            var cfg = _redConfig();
+            if (cfg.modo === 'cliente' && cfg.host) {
+                return 'ws://' + cfg.host + ':' + (cfg.port || 3000);
+            }
             return 'ws://127.0.0.1:3000';
         }
+        // Reflejar en localStorage lo que resolvió el proceso principal: la
+        // ventana de Ajustes lee la configuración desde ahí.
+        (function _reflejarConfigRed() {
+            try {
+                if (window.__TECNITEC_RED__ && window.__TECNITEC_RED__.modo) {
+                    localStorage.setItem('tecnitec_red_config', JSON.stringify(window.__TECNITEC_RED__));
+                }
+            } catch (e) { }
+        })();
         const API = _getAPIBase();
         let store = { clientes: [], catalogo: [], ordenes: [], ticket: { local: 'TECNITEC', direccion: '', localidad: '', telefono: '', legal: '', logo: '' } };
 
@@ -3171,8 +3191,13 @@
 
             let progreso = 0;
             let intentos = 0;
-            const MAX = 80;   // ~40 segundos (da tiempo al npm install automático)
+            const MAX = 80;   // ~40 segundos (da tiempo al arranque del servidor)
             const DELAY = 500;
+            const esCliente = _esClienteRemoto();
+            const _cfgArranque = _redConfig();
+            const destino = esCliente
+                ? (_cfgArranque.host + ':' + (_cfgArranque.port || 3000))
+                : 'este equipo';
 
             const barInterval = setInterval(function () {
                 progreso = Math.min(progreso + (intentos < 5 ? 3 : 0.8), 90);
@@ -3183,9 +3208,17 @@
                 intentos++;
 
                 // Mensajes de estado según el tiempo transcurrido
-                if (intentos === 5 && msg) msg.textContent = 'Iniciando servidor...';
-                if (intentos === 15 && msg) msg.textContent = 'Instalando dependencias (primera vez puede tardar ~30s)...';
-                if (intentos === 35 && msg) msg.textContent = 'Casi listo, descargando paquetes de seguridad...';
+                if (intentos === 5 && msg) {
+                    msg.textContent = esCliente
+                        ? 'Conectando con el servidor ' + destino + '...'
+                        : 'Iniciando servidor...';
+                }
+                if (intentos === 15 && msg && !esCliente) msg.textContent = 'Instalando dependencias (primera vez puede tardar ~30s)...';
+                if (intentos === 35 && msg) {
+                    msg.textContent = esCliente
+                        ? 'Reintentando conexión con ' + destino + '...'
+                        : 'Casi listo, descargando paquetes de seguridad...';
+                }
 
                 fetch(_getAPIBase() + '/login', {
                     method: 'POST',
@@ -3210,8 +3243,20 @@
                             if (bar) bar.style.background = '#ef4444';
                             if (msg) {
                                 msg.style.color = '#ef4444';
-                                msg.innerHTML = '❌ No se pudo iniciar el servidor.<br>' +
-                                    '<span style="font-size:0.7rem;color:#64748b;">Abrí una terminal en la carpeta del proyecto y ejecutá: <code style="background:#1e293b;padding:2px 6px;border-radius:4px;">npm install</code></span>';
+                                if (esCliente) {
+                                    // Modo cliente: el servidor vive en otra PC. Acá no
+                                    // hay nada que "instalar": o esa PC está apagada,
+                                    // o la IP/puerto configurados no son los correctos.
+                                    msg.innerHTML = '❌ No se pudo conectar con el servidor ' + destino + '.<br>' +
+                                        '<span style="font-size:0.7rem;color:#64748b;">Verificá que esa PC esté encendida y que TECNITEC esté corriendo ahí.</span>' +
+                                        '<div style="margin-top:12px;display:flex;gap:8px;justify-content:center;">' +
+                                        '<button onclick="location.reload()" style="background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;">Reintentar</button>' +
+                                        '<button onclick="if(window.abrirConfigRed){abrirConfigRed()}" style="background:#3b82f6;border:none;color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;">Configurar red</button>' +
+                                        '</div>';
+                                } else {
+                                    msg.innerHTML = '❌ No se pudo iniciar el servidor.<br>' +
+                                        '<span style="font-size:0.7rem;color:#64748b;">Abrí una terminal en la carpeta del proyecto y ejecutá: <code style="background:#1e293b;padding:2px 6px;border-radius:4px;">npm install</code></span>';
+                                }
                             }
                             return;
                         }
@@ -12222,8 +12267,6 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
         }
 
         async function redGuardarConfig() {
-            var modoLocal = document.getElementById('red-btn-local').style.borderColor.includes('primary') ||
-                !document.getElementById('red-btn-cliente').style.borderColor.includes('primary');
             var modo = document.getElementById('red-panel-cliente').style.display !== 'none' ? 'cliente' : 'local';
             var host = (document.getElementById('red-host')?.value || '').trim();
             var port = parseInt(document.getElementById('red-port')?.value) || 3000;
@@ -12232,21 +12275,31 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                 showToast('⚠️ Ingresá la IP del servidor', 'warning'); return;
             }
 
-            var cfg = { modo, host, port };
+            var cfg = { modo: modo, host: host, port: port };
             localStorage.setItem('tecnitec_red_config', JSON.stringify(cfg));
 
-            // Sincronizar con main process si está disponible
-            if (window.require) {
+            // El proceso principal guarda la config, aplica el cambio (servidor
+            // local on/off) y recarga esta ventana con la CSP correcta.
+            if (window.electronAPI && window.electronAPI.invoke) {
                 try {
-                    if (window.electronAPI) {
-                        await window.electronAPI.invoke('red:guardar', cfg);
+                    var r = await window.electronAPI.invoke('red:guardar', cfg);
+                    if (r && r.ok === false) {
+                        showToast('⚠️ ' + (r.error || 'No se pudo guardar la configuración'), 'warning', 5000);
+                        return;
                     }
-                } catch (e) { }
+                    var ov = document.getElementById('red-config-overlay');
+                    if (ov) ov.remove();
+                    showToast('✅ Configuración guardada — reiniciando...', 'success', 3000);
+                    return;
+                } catch (e) {
+                    console.warn('red:guardar falló, se usa sólo localStorage:', e && e.message);
+                }
             }
 
-            document.getElementById('red-config-overlay').remove();
+            var overlay = document.getElementById('red-config-overlay');
+            if (overlay) overlay.remove();
             showToast('✅ Configuración guardada — reiniciando...', 'success', 2000);
-            setTimeout(() => location.reload(), 1800);
+            setTimeout(function () { location.reload(); }, 1800);
         }
 
         // Cargar info de licencia desde main process y actualizar widget
@@ -12317,13 +12370,12 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
 
         // Cargar config de red desde main process al inicio (si disponible)
         (async function sincronizarConfigRed() {
-            if (window.require) {
-                try {
-                    var { ipcRenderer } = window.require('electron');
-                    var cfg = await ipcRenderer.invoke('red:leer');
-                    if (cfg) localStorage.setItem('tecnitec_red_config', JSON.stringify(cfg));
-                } catch (e) { }
-            }
+            try {
+                if (window.electronAPI && window.electronAPI.invoke) {
+                    var cfg = await window.electronAPI.invoke('red:leer');
+                    if (cfg && cfg.modo) localStorage.setItem('tecnitec_red_config', JSON.stringify(cfg));
+                }
+            } catch (e) { }
         })();
 
         // SISTEMA DE AUTO-UPDATE — electron-updater (reemplaza el viejo version.json)

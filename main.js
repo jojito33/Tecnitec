@@ -267,7 +267,8 @@ function createWindow() {
 
     // Cargar índice IMEDIATAMENTE - el servidor inicia en segundo plano
     writeLog('Cargando índice inmediatamente');
-    mainWindow.loadFile('index.html');
+    const cfgRed = leerConfigRed();
+    mainWindow.loadFile(prepararUI(cfgRed));
 
     // Avisar a la UI si ya había una actualización detectada y buscar una nueva
     mainWindow.webContents.on('did-finish-load', () => {
@@ -277,8 +278,12 @@ function createWindow() {
         if (app.isPackaged) setTimeout(buscarActualizacion, 3000);
     });
 
-    // Iniciar servidor en segundo plano (no bloquea UI)
-    if (!esModoCliente()) {
+    // Iniciar servidor en segundo plano (no bloquea UI).
+    // En modo cliente el servidor está en otra PC: acá no se levanta nada.
+    if (cfgRed.modo === 'cliente') {
+        writeLog('[RED] Modo cliente — servidor remoto ' + cfgRed.host + ':' + cfgRed.port +
+            ' (no se inicia servidor local)');
+    } else {
         lanzarServidor(path.join(__dirname, 'server.js'));
     }
 
@@ -294,9 +299,74 @@ function createWindow() {
     setTimeout(cerrarSplash, splashMaxMs);
 }
 
-// ─── Modo cliente
+// ─── Configuración de red: servidor local (esta PC atiende) o cliente remoto
+// Antes esto miraba un tecnitec_red.json dentro de __dirname, que en la versión
+// instalada queda dentro del app.asar (sólo lectura) y nunca se creaba: el modo
+// cliente no se guardaba en ningún lado y el servidor local arrancaba igual.
+const RED_ARCHIVO = path.join(_dataDir, 'tecnitec_red.json');
+const RED_VALIDA = /^[a-zA-Z0-9.\-]{1,253}$/;
+
+function leerConfigRed() {
+    try {
+        // El .json puede haber quedado guardado con BOM (Bloc de notas, PowerShell)
+        const texto = require('fs').readFileSync(RED_ARCHIVO, 'utf8').replace(/^\uFEFF/, '');
+        const cfg = JSON.parse(texto);
+        if (cfg && (cfg.modo === 'cliente' || cfg.modo === 'local')) {
+            return {
+                modo: cfg.modo,
+                host: typeof cfg.host === 'string' ? cfg.host : '',
+                port: parseInt(cfg.port, 10) || 3000
+            };
+        }
+    } catch (_) { }
+    return { modo: 'local', host: '', port: 3000 };
+}
+
+function guardarConfigRed(cfg) {
+    const nuevo = {
+        modo: cfg && cfg.modo === 'cliente' ? 'cliente' : 'local',
+        host: cfg && typeof cfg.host === 'string' ? cfg.host.trim() : '',
+        port: cfg ? (parseInt(cfg.port, 10) || 3000) : 3000
+    };
+    if (nuevo.port < 1 || nuevo.port > 65535) throw new Error('Puerto inválido');
+    if (nuevo.modo === 'cliente' && !RED_VALIDA.test(nuevo.host)) {
+        throw new Error('IP o nombre de servidor inválido');
+    }
+    require('fs').mkdirSync(_dataDir, { recursive: true });
+    require('fs').writeFileSync(RED_ARCHIVO, JSON.stringify(nuevo, null, 2));
+    return nuevo;
+}
+
 function esModoCliente() {
-    try { return require('fs').existsSync(path.join(__dirname, 'tecnitec_red.json')); } catch(e) { return false; }
+    return leerConfigRed().modo === 'cliente';
+}
+
+// La CSP del index.html sólo permite conectarse a localhost:3000. En modo
+// cliente eso bloquea todo pedido al servidor remoto (la pantalla de arranque
+// nunca pasaba y terminaba diciendo "No se pudo iniciar el servidor"). Acá se
+// genera una copia del HTML con el host remoto habilitado y la config ya
+// inyectada, para que el renderer no dependa de un localStorage viejo.
+function prepararUI(cfg) {
+    const original = path.join(__dirname, 'index.html');
+    try {
+        const fs = require('fs');
+        let html = fs.readFileSync(original, 'utf8');
+        const extra = (cfg.modo === 'cliente' && cfg.host)
+            ? ' http://' + cfg.host + ':' + cfg.port + ' ws://' + cfg.host + ':' + cfg.port
+            : '';
+        const antes = "connect-src 'self' http://localhost:3000";
+        if (html.indexOf(antes) === -1) throw new Error('no se encontró la directiva connect-src');
+        html = html.replace(antes, "connect-src 'self'" + extra + ' http://localhost:3000');
+        html = html.replace('<head>',
+            '<head>\n    <script>window.__TECNITEC_RED__ = ' + JSON.stringify(cfg) + ';</script>');
+        const destino = path.join(_dataDir, 'ui', 'index.html');
+        fs.mkdirSync(path.dirname(destino), { recursive: true });
+        fs.writeFileSync(destino, html);
+        return destino;
+    } catch (e) {
+        writeLog('[RED] No se pudo preparar la UI: ' + e.message);
+        return original;
+    }
 }
 
 // ─── Servidor interno: arranque con reintentos y aviso visible si no levanta
@@ -306,6 +376,7 @@ const MAX_REINTENTOS_SERVIDOR = 3;
 let _reintentosServidor = 0;
 let _salidaServidor = [];
 let _avisoServidorMostrado = false;
+let _servidorDetenidoPorModo = false;
 
 function _guardarSalidaServidor(d) {
     String(d).split('\n').forEach(l => {
@@ -343,6 +414,7 @@ function _avisarServidorCaido() {
 function lanzarServidor(serverJS) {
     writeLog('Iniciando servidor Express en proceso hijo' +
         (_reintentosServidor ? ' (reintento ' + _reintentosServidor + '/' + MAX_REINTENTOS_SERVIDOR + ')' : ''));
+    _servidorDetenidoPorModo = false;
 
     const proc = require('child_process').fork(serverJS, [], {
         silent: true,
@@ -370,18 +442,62 @@ function lanzarServidor(serverJS) {
 
     proc.on('exit', (code, signal) => {
         writeLog(`Servidor terminó: código=${code} señal=${signal}`);
-        if (_appQuitting) return;
+        if (_appQuitting || _servidorDetenidoPorModo) return;
 
         if (_reintentosServidor < MAX_REINTENTOS_SERVIDOR) {
             const espera = 3000 * Math.pow(2, _reintentosServidor); // 3s, 6s, 12s
             _reintentosServidor++;
             writeLog('Reintentando servidor en ' + (espera / 1000) + 's...');
-            setTimeout(() => { if (!_appQuitting) lanzarServidor(serverJS); }, espera);
+            setTimeout(() => { if (!_appQuitting && !_servidorDetenidoPorModo) lanzarServidor(serverJS); }, espera);
         } else {
             _avisarServidorCaido();
         }
     });
 }
+
+// ─── Cambio de rol en caliente (Ajustes → Configuración de Red)
+// Al pasar a cliente hay que apagar el servidor y su Chrome; al volver a local,
+// levantarlo de nuevo sin reiniciar la app.
+function detenerServidor() {
+    if (!serverProcess || serverProcess.killed) return;
+    writeLog('[RED] Deteniendo servidor local por cambio a modo cliente');
+    _servidorDetenidoPorModo = true;
+    const proc = serverProcess;
+    try {
+        proc.send({ tipo: 'shutdown' });
+    } catch (_) {
+        try { proc.kill(); } catch (_) { }
+        return;
+    }
+    setTimeout(() => { try { if (proc && !proc.killed) proc.kill(); } catch (_) { } }, 4000).unref();
+}
+
+function aplicarConfigRed(cfg) {
+    if (cfg.modo === 'cliente') {
+        detenerServidor();
+    } else if (!serverProcess || serverProcess.killed) {
+        _reintentosServidor = 0;
+        _avisoServidorMostrado = false;
+        lanzarServidor(path.join(__dirname, 'server.js'));
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.loadFile(prepararUI(cfg));
+    }
+}
+
+ipcMain.handle('red:leer', () => leerConfigRed());
+
+ipcMain.handle('red:guardar', (_event, cfg) => {
+    try {
+        const nuevo = guardarConfigRed(cfg);
+        writeLog('[RED] Configuración guardada: ' + JSON.stringify(nuevo));
+        aplicarConfigRed(nuevo);
+        return { ok: true, config: nuevo };
+    } catch (e) {
+        writeLog('[RED] No se pudo guardar la configuración: ' + e.message);
+        return { ok: false, error: e.message };
+    }
+});
 
 // ─── Cierre ordenado del servidor hijo
 app.on('before-quit', (event) => {
