@@ -3193,7 +3193,12 @@
             let intentos = 0;
             const MAX = 80;   // ~40 segundos (da tiempo al arranque del servidor)
             const DELAY = 500;
+            const T0 = Date.now();
+            const TIMEOUT_INTENTO_MS = 5000;
             const esCliente = _esClienteRemoto();
+            // En modo cliente no hay servidor local que esperar: 15s alcanzan y
+            // sobra. En modo local se mantienen los 45s (arranque + dependencias).
+            const LIMITE_MS = esCliente ? 15000 : 45000;
             const _cfgArranque = _redConfig();
             const destino = esCliente
                 ? (_cfgArranque.host + ':' + (_cfgArranque.port || 3000))
@@ -3223,7 +3228,11 @@
                 fetch(_getAPIBase() + '/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ _ping: true })
+                    body: JSON.stringify({ _ping: true }),
+                    // Sin esto, un servidor que acepta la conexión pero no
+                    // contesta deja la pantalla de arranque colgada para siempre.
+                    signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
+                        ? AbortSignal.timeout(TIMEOUT_INTENTO_MS) : undefined
                 })
                     .then(function () {
                         clearInterval(barInterval);
@@ -3238,7 +3247,7 @@
                         }, 300);
                     })
                     .catch(function () {
-                        if (intentos >= MAX) {
+                        if (intentos >= MAX || (Date.now() - T0) >= LIMITE_MS) {
                             clearInterval(barInterval);
                             if (bar) bar.style.background = '#ef4444';
                             if (msg) {
@@ -3341,6 +3350,13 @@
             _serverOfflineBanner = null;
         }
 
+        // Topes de espera: un servidor mudo (acepta la conexión y no contesta)
+        // no debe dejar la pantalla colgada. Las operaciones pesadas (backup a
+        // Drive, envíos de WhatsApp, importaciones) quedan sin tope a propósito.
+        const TIMEOUT_LECTURA_MS = 20000;
+        const TIMEOUT_HEALTH_MS = 5000;
+        let _avisoTimeoutActivo = false;
+
         async function apiFetch(url, options = {}) {
             const token = getAuthToken();
             const headers = {
@@ -3348,11 +3364,15 @@
                 ...(options.headers || {}),
                 ...(token ? { 'Authorization': `Bearer ${token}` } : {})
             };
+            const metodo = String(options.method || 'GET').toUpperCase();
+            const esLectura = metodo === 'GET' || metodo === 'HEAD';
+            const signal = options.signal || (esLectura && typeof AbortSignal !== 'undefined' && AbortSignal.timeout
+                ? AbortSignal.timeout(TIMEOUT_LECTURA_MS) : undefined);
 
             progressStart();
             let response;
             try {
-                response = await fetch(url, { ...options, headers });
+                response = await fetch(url, { ...options, headers, ...(signal ? { signal } : {}) });
                 _fallosRedSeguidos = 0;
                 if (_avisoOfflineTimer) { clearTimeout(_avisoOfflineTimer); _avisoOfflineTimer = null; }
                 // Servidor respondió — si estaba offline, recuperamos
@@ -3364,6 +3384,12 @@
                 progressDone();
             } catch (networkErr) {
                 progressDone();
+                const esTimeout = !!(networkErr && (networkErr.name === 'TimeoutError' || networkErr.name === 'AbortError'));
+                if (esTimeout && !_avisoTimeoutActivo) {
+                    _avisoTimeoutActivo = true;
+                    setTimeout(function () { _avisoTimeoutActivo = false; }, 10000);
+                    showToast('⏱️ El servidor no respondió a tiempo', 'warning', 6000);
+                }
                 // Un solo fallo no significa que el servidor esté caído: al abrir
                 // un módulo se disparan varias peticiones y, durante el arranque
                 // (o un pico de CPU), alguna puede fallar. Se confirma con
@@ -3372,7 +3398,11 @@
                 if (_serverOnline && !_avisoOfflineTimer) {
                     _avisoOfflineTimer = setTimeout(function () {
                         _avisoOfflineTimer = null;
-                        fetch(API + '/health', { cache: 'no-store' }).then(function (r) {
+                        fetch(API + '/health', {
+                            cache: 'no-store',
+                            signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
+                                ? AbortSignal.timeout(TIMEOUT_HEALTH_MS) : undefined
+                        }).then(function (r) {
                             if (!r.ok) throw new Error('health ' + r.status);
                             _fallosRedSeguidos = 0; // el servidor está vivo: fue un hipo
                         }).catch(function () {
@@ -13223,9 +13253,16 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                 if (_ws && (_ws.readyState === 0 || _ws.readyState === 1)) return;
                 try {
                     var base = _getWSBase();
-                    _ws = new WebSocket(base + '/ws');
-                    _ws.onopen = function () { /* console.log('[WS] Conectado'); */ };
-                    _ws.onmessage = function (evt) {
+                    var sock = new WebSocket(base + '/ws');
+                    _ws = sock;
+                    // Si el servidor acepta el TCP pero no completa el handshake,
+                    // el socket queda en CONNECTING para siempre y nunca reconecta:
+                    // se corta solo a los 8s.
+                    var timerConexion = setTimeout(function () {
+                        try { if (sock.readyState === 0) sock.close(); } catch (e) { }
+                    }, 8000);
+                    sock.onopen = function () { clearTimeout(timerConexion); /* console.log('[WS] Conectado'); */ };
+                    sock.onmessage = function (evt) {
                         try {
                             var data = JSON.parse(evt.data);
                             if (data.tipo === 'wa_qr' && data.qr) {
@@ -13248,13 +13285,14 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                             }
                         } catch (e) { }
                     };
-                    _ws.onclose = function () {
+                    sock.onclose = function () {
+                        clearTimeout(timerConexion);
                         _ws = null;
                         // Reconectar en 5s
                         if (_wsReconectTimeout) clearTimeout(_wsReconectTimeout);
                         _wsReconectTimeout = setTimeout(_conectarWebSocket, 5000);
                     };
-                    _ws.onerror = function () { _ws.close(); };
+                    sock.onerror = function () { try { sock.close(); } catch (e) { } };
                 } catch (e) { }
             }
 
