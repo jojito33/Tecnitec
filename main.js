@@ -499,6 +499,85 @@ ipcMain.handle('red:guardar', (_event, cfg) => {
     }
 });
 
+// ─── Búsqueda del servidor en la red local (para cuando cambia la IP)
+// Se hace desde el proceso principal: el renderer tiene CSP y no puede abrir
+// sockets a IPs arbitrarias. Devuelve sólo equipos que contestan el ping de
+// TECNITEC, así no se confunde con cualquier cosa que tenga el puerto abierto.
+function _subredLocal() {
+    try {
+        const redes = require('os').networkInterfaces();
+        for (const nombre of Object.keys(redes)) {
+            for (const it of redes[nombre] || []) {
+                if (it.family !== 'IPv4' || it.internal) continue;
+                if (it.address.startsWith('169.254.')) continue;
+                const p = it.address.split('.');
+                return { base: p.slice(0, 3).join('.'), propio: it.address };
+            }
+        }
+    } catch (_) { }
+    return null;
+}
+
+function _probarPuerto(ip, puerto, timeoutMs) {
+    return new Promise(resolve => {
+        const sock = new (require('net').Socket)();
+        let resuelto = false;
+        const fin = ok => { if (resuelto) return; resuelto = true; try { sock.destroy(); } catch (_) { } resolve(ok); };
+        sock.setTimeout(timeoutMs);
+        sock.once('connect', () => fin(true));
+        sock.once('timeout', () => fin(false));
+        sock.once('error', () => fin(false));
+        try { sock.connect(puerto, ip); } catch (_) { fin(false); }
+    });
+}
+
+function _pingTecnitec(ip, puerto, timeoutMs) {
+    return new Promise(resolve => {
+        let req;
+        try {
+            req = require('http').get({ host: ip, port: puerto, path: '/api/red/ping', timeout: timeoutMs }, res => {
+                let datos = '';
+                res.on('data', c => datos += c);
+                res.on('end', () => {
+                    try {
+                        const j = JSON.parse(datos);
+                        resolve(j && j.ok ? { ip: ip, puerto: puerto, version: j.version || '' } : null);
+                    } catch (_) { resolve(null); }
+                });
+            });
+        } catch (_) { return resolve(null); }
+        req.on('timeout', () => { try { req.destroy(); } catch (_) { } resolve(null); });
+        req.on('error', () => resolve(null));
+    });
+}
+
+async function escanearServidores(puerto) {
+    const red = _subredLocal();
+    if (!red) return { ok: false, error: 'No se detectó una red local en esta PC' };
+    const hosts = [];
+    for (let i = 1; i <= 254; i++) {
+        const ip = red.base + '.' + i;
+        if (ip !== red.propio) hosts.push(ip);
+    }
+    writeLog('[RED] Buscando servidores en ' + red.base + '.0/24:' + puerto);
+    const encontrados = [];
+    let idx = 0;
+    const trabajador = async () => {
+        while (idx < hosts.length) {
+            const ip = hosts[idx++];
+            if (!(await _probarPuerto(ip, puerto, 700))) continue;
+            const info = await _pingTecnitec(ip, puerto, 1200);
+            if (info && !encontrados.some(s => s.ip === info.ip)) encontrados.push(info);
+        }
+    };
+    await Promise.all(Array.from({ length: 48 }, trabajador));
+    encontrados.sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true }));
+    writeLog('[RED] Búsqueda terminada: ' + (encontrados.length ? encontrados.map(s => s.ip).join(', ') : 'sin resultados'));
+    return { ok: true, subred: red.base + '.0/24', encontrados: encontrados };
+}
+
+ipcMain.handle('red:escanear', (_event, puerto) => escanearServidores(parseInt(puerto, 10) || 3000));
+
 // ─── Cierre ordenado del servidor hijo
 app.on('before-quit', (event) => {
     if (_appQuitting) return;

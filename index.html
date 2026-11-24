@@ -12230,6 +12230,10 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
                         🔍 Probar conexión
                     </button>
                     <div id="red-test-result" style="margin-top:8px;font-size:.78rem;min-height:20px;"></div>
+                    <button id="red-btn-buscar" onclick="redBuscarServidores()" style="width:100%;margin-top:10px;background:var(--accent);border:1px solid var(--accent);border-radius:10px;color:var(--text);padding:9px;cursor:pointer;font-size:.83rem;font-weight:600;">
+                        📡 Buscar servidor en la red
+                    </button>
+                    <div id="red-scan-result" style="margin-top:8px;font-size:.78rem;min-height:20px;"></div>
                 </div>
 
                 <!-- Panel local: mostrar IPs disponibles -->
@@ -12296,6 +12300,53 @@ Ajustar stock (número positivo para agregar, negativo para restar):`, '0');
             } catch (e) {
                 result.innerHTML = '<span style="color:var(--primary);">❌ No se pudo conectar: ' + e.message + '</span>';
             }
+        }
+
+        // Busca servidores TECNITEC en la red local. Lo hace el proceso
+        // principal (la CSP del renderer no permite abrir conexiones a IPs
+        // arbitrarias) y devuelve sólo los que contestan /api/red/ping.
+        async function redBuscarServidores() {
+            var res = document.getElementById('red-scan-result');
+            var btn = document.getElementById('red-btn-buscar');
+            var port = parseInt(document.getElementById('red-port')?.value) || 3000;
+            if (!res) return;
+            if (!window.electronAPI || !window.electronAPI.invoke) {
+                res.innerHTML = '<span style="color:var(--warning);">La búsqueda automática sólo funciona en la app de escritorio.</span>';
+                return;
+            }
+            res.innerHTML = '<span style="color:var(--text-muted);">⏳ Buscando en la red local (puede tardar unos segundos)...</span>';
+            if (btn) btn.disabled = true;
+            try {
+                var r = await window.electronAPI.invoke('red:escanear', port);
+                if (!r || r.ok === false) {
+                    res.innerHTML = '<span style="color:var(--warning);">' + ((r && r.error) || 'No se pudo escanear la red') + '</span>';
+                    return;
+                }
+                if (!r.encontrados || !r.encontrados.length) {
+                    res.innerHTML = '<span style="color:var(--warning);">No se encontró ningún TECNITEC en ' + r.subred + ':' + port +
+                        '.<br><span style="color:var(--text-muted);font-size:.72rem;">Revisá que la PC del servidor esté encendida, con TECNITEC abierto y en la misma red.</span></span>';
+                    return;
+                }
+                res.innerHTML = r.encontrados.map(function (s) {
+                    return '<button onclick="redUsarServidor(\'' + s.ip + '\',' + (s.puerto || port) + ')" ' +
+                        'style="display:block;width:100%;margin-top:6px;background:var(--input-bg);border:1px solid var(--success);border-radius:8px;color:var(--text);padding:8px;cursor:pointer;font-size:.8rem;font-family:monospace;text-align:left;">' +
+                        '🖥️ ' + s.ip + ':' + (s.puerto || port) + (s.version ? '  (v' + s.version + ')' : '') +
+                        ' <span style="color:var(--success);float:right;">usar</span></button>';
+                }).join('');
+            } catch (e) {
+                res.innerHTML = '<span style="color:var(--warning);">Error al buscar: ' + (e && e.message) + '</span>';
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        function redUsarServidor(ip, puerto) {
+            var h = document.getElementById('red-host');
+            var p = document.getElementById('red-port');
+            if (h) h.value = ip;
+            if (p) p.value = puerto || 3000;
+            redProbarConexion();
+            showToast('🖥️ Servidor seleccionado: ' + ip, 'success');
         }
 
         async function redGuardarConfig() {
